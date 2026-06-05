@@ -25,14 +25,17 @@ logger = logging.getLogger(__name__)
 
 RAW_INJURIES_DIR = Path("data/raw/injuries")
 
-# ── Transaction type codes used by the MLB Stats API ────────────────────────
-# IL  = placed on injured list (10 / 15 / 60 day)
-# IA  = activated from injured list
-# ITD = transferred to a longer IL (e.g. 15-day → 60-day); same stint
+# ── IL transaction classification ───────────────────────────────────────────
+# The MLB Stats API returns all IL transactions as typeCode='SC' (Status Change).
+# The actual event type lives in the description text, so we derive it from there.
+_RE_PLACEMENT  = re.compile(r"\bplaced\b.{0,60}\binjured list\b", re.I)
+_RE_ACTIVATION = re.compile(r"\bactivated\b.{0,60}\binjured list\b", re.I)
+_RE_TRANSFER   = re.compile(r"\btransferred\b.{0,60}\binjured list\b", re.I)
+_RE_ANY_IL     = re.compile(r"\binjured list\b", re.I)
+
 _PLACEMENT_CODES  = frozenset({"IL"})
 _ACTIVATION_CODES = frozenset({"IA"})
 _TRANSFER_CODES   = frozenset({"ITD"})
-_IL_ALL_CODES     = _PLACEMENT_CODES | _ACTIVATION_CODES | _TRANSFER_CODES
 
 # ── Injury-type keyword patterns (applied in order — first match wins) ───────
 # Order matters: more specific body parts precede broader ones.
@@ -122,18 +125,22 @@ def fetch_il_transactions(
             transactions = data.get("transactions", [])
 
             for t in transactions:
-                type_code = t.get("typeCode", "")
-                type_desc = t.get("typeDesc", "")
+                desc = t.get("description") or ""
 
-                # Keep only IL placements, activations, and transfers.
-                is_il = (
-                    type_code in _IL_ALL_CODES
-                    or "IL" in type_desc.upper()
-                    or "INJURED" in type_desc.upper()
-                    or "ACTIVATED" in type_desc.upper()
-                )
-                if not is_il:
+                # The API returns all IL events as typeCode='SC' (Status Change).
+                # Skip anything that doesn't mention the injured list.
+                if not _RE_ANY_IL.search(desc):
                     continue
+
+                # Classify placement / activation / transfer from description text.
+                if _RE_PLACEMENT.search(desc):
+                    tx_type = "IL"
+                elif _RE_ACTIVATION.search(desc):
+                    tx_type = "IA"
+                elif _RE_TRANSFER.search(desc):
+                    tx_type = "ITD"
+                else:
+                    tx_type = "IL_OTHER"
 
                 person = t.get("person") or {}
                 team   = (t.get("toTeam") or t.get("fromTeam") or {}).get("name")
@@ -142,10 +149,10 @@ def fetch_il_transactions(
                     "player_id":        person.get("id"),
                     "player_name":      person.get("fullName"),
                     "team":             team,
-                    "transaction_type": type_code,
-                    "type_desc":        type_desc,
+                    "transaction_type": tx_type,
+                    "type_desc":        t.get("typeDesc", ""),
                     "transaction_date": t.get("date") or t.get("effectiveDate"),
-                    "description":      t.get("description", ""),
+                    "description":      desc,
                     "season":           year,
                 })
                 year_count += 1
