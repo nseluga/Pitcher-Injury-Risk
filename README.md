@@ -6,7 +6,7 @@ A baseball pitcher health modeling platform designed to predict injury probabili
 
 ## Motivation
 
-Pitcher injuries are among the most costly and disruptive events in professional baseball. Despite advances in biomechanics and sports science, ML-driven pitcher health modeling remains largely siloed — focusing narrowly on binary injury prediction rather than taking a holistic view of pitcher health over time.
+Pitcher injuries are among the most costly and disruptive events in professional baseball. Despite advances in biomechanics and sports science, ML-driven pitcher health modeling remains largely siloed, focusing narrowly on binary injury prediction rather than taking a holistic view of pitcher health over time.
 
 This project approaches pitcher health as a multi-dimensional research problem:
 
