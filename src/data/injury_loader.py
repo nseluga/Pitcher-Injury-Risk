@@ -40,28 +40,36 @@ _TRANSFER_CODES   = frozenset({"ITD"})
 # ── Injury-type keyword patterns (applied in order — first match wins) ───────
 # Order matters: more specific body parts precede broader ones.
 _INJURY_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("elbow",       re.compile(r"elbow|ucl|ulnar collateral|flexor mass|"
+    # Typos "elobw" and "eblow" appear in real MLB API data.
+    ("elbow",       re.compile(r"elbow|elobw|eblow|ucl|ulnar collateral|flexor mass|"
                                r"medial epicondyle|olecranon|valgus", re.I)),
     ("shoulder",    re.compile(r"shoulder|rotator cuff|labrum|biceps tendon|"
+                               r"biceps tendinit|biceps inflam|biceps strain|"
                                r"glenohumeral|supraspinatus|infraspinatus|"
-                               r"ac joint|acromioclavicular", re.I)),
-    ("forearm",     re.compile(r"forearm|pronator|flexor.pronator", re.I)),
+                               r"ac joint|acromioclavicular|teres major|"
+                               r"\bdeltoid\b|triceps", re.I)),
+    # "flexor strain" / "flexor muscle" without a qualifier maps to forearm.
+    ("forearm",     re.compile(r"forearm|pronator|flexor.pronator|"
+                               r"flexor (muscle |tendon )?(strain|tear|inflammation|sprain)", re.I)),
     ("back",        re.compile(r"\bback\b|lumbar|thoracic|\bspine\b|"
-                               r"vertebr|disc herniation|stress reaction", re.I)),
+                               r"vertebr|disc herniation|stress reaction|"
+                               r"\blat\b|latissimus|rhomboid|rib.cage|"
+                               r"pectoral|\bpec\b", re.I)),
     ("oblique",     re.compile(r"oblique|side strain", re.I)),
     ("hamstring",   re.compile(r"hamstring", re.I)),
     ("hip",         re.compile(r"\bhip\b|groin|adductor|hip flexor|"
-                               r"femoral", re.I)),
+                               r"femoral|si joint|sacroiliac", re.I)),
     ("knee",        re.compile(r"\bknee\b|patellar|meniscus|\bacl\b|\bmcl\b|"
                                r"pcl\b", re.I)),
     ("finger_hand", re.compile(r"finger|blister|thumb|\bhand\b|wrist|"
-                               r"carpal|nail|metacarpal", re.I)),
-    ("calf_ankle",  re.compile(r"\bcalf\b|achilles|\bankle\b|plantar", re.I)),
+                               r"carpal|nail|metacarpal|knuckle", re.I)),
+    ("calf_ankle",  re.compile(r"\bcalf\b|achilles|\bankle\b|plantar|"
+                               r"\bshin\b|\bfoot\b|\btoe\b|metatarsal", re.I)),
     ("neck",        re.compile(r"\bneck\b|cervical", re.I)),
     ("illness",     re.compile(r"illness|sick|virus|\bflu\b|infection|"
                                r"covid|personal|non.baseball|bereavement|"
                                r"paternity|concussion|mental health|"
-                               r"undisclosed", re.I)),
+                               r"undisclosed|anxiety|cancer|facial fracture", re.I)),
 ]
 
 
