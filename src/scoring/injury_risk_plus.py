@@ -18,10 +18,41 @@ Full design specification: docs/injury_risk_plus_design.md
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
+DEFAULT_WEIGHTS = {
+    "injury_prob_30d": 0.50,
+    "expected_days_lost": 0.30,
+    "hazard_rate": 0.20,
+}
 
-def compute_raw_risk_score(predictions_df: pd.DataFrame) -> pd.DataFrame:
+
+def _archetype_for(master_df: pd.DataFrame) -> pd.Series:
+    """Rule-based starter/reliever split (see baseline_models._rule_based_archetype).
+
+    `encode_pitcher_archetype` (src/features/risk_factor_features.py) is still
+    a stub, so we fall back to the same pitch-count heuristic used elsewhere
+    in the pipeline — pitchers averaging >= 50 pitches per appearance in a
+    season are treated as starters.
+    """
+    season_avg = master_df.groupby(["pitcher", "season"])["pitch_count"].transform("mean")
+    return pd.Series(np.where(season_avg >= 50, "starter", "reliever"), index=master_df.index)
+
+
+def _normalize_component(s: pd.Series) -> pd.Series:
+    """Min-max normalize a component to [0, 1]; constant series map to 0."""
+    s = s.astype(float)
+    lo, hi = s.min(), s.max()
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        return pd.Series(np.zeros(len(s)), index=s.index)
+    return (s - lo) / (hi - lo)
+
+
+def compute_raw_risk_score(
+    predictions_df: pd.DataFrame,
+    weights: dict[str, float] | None = None,
+) -> pd.DataFrame:
     """Combine multi-task model predictions into a single raw risk index.
 
     Blends:
@@ -29,16 +60,36 @@ def compute_raw_risk_score(predictions_df: pd.DataFrame) -> pd.DataFrame:
     - Expected days lost (severity weight)
     - Survival hazard rate (time-to-event signal)
 
-    Blend weights are defined in score_calibration.py and may be tuned.
+    Each component is min-max normalized to [0, 1] before blending so that
+    weights are comparable regardless of each component's native scale.
+    Blend weights default to docs/injury_risk_plus_design.md's values, or
+    may be supplied directly (e.g. from score_calibration.optimize_blend_weights).
 
     Args:
         predictions_df: DataFrame with columns: injury_prob_30d,
             expected_days_lost, hazard_rate.
+        weights: Optional override for blend weights (defaults to
+            DEFAULT_WEIGHTS / docs/injury_risk_plus_design.md).
 
     Returns:
         predictions_df with new column raw_risk_score.
     """
-    raise NotImplementedError
+    weights = weights or DEFAULT_WEIGHTS
+    out = predictions_df.copy()
+
+    raw = pd.Series(np.zeros(len(out)), index=out.index)
+    total_weight = 0.0
+    for component, w in weights.items():
+        if component not in out.columns or w == 0:
+            continue
+        raw = raw + w * _normalize_component(out[component])
+        total_weight += w
+
+    if total_weight > 0:
+        raw = raw / total_weight
+
+    out["raw_risk_score"] = raw
+    return out
 
 
 def normalize_to_injury_risk_plus(
@@ -58,18 +109,36 @@ def normalize_to_injury_risk_plus(
         raw_scores: Series of raw risk scores.
         season: Season year for era-adjustment lookup.
         archetype: If provided, normalizes within the archetype group.
-        reference_df: Historical reference DataFrame used to compute the
-            normalization denominator. If None, computed from raw_scores.
+        reference_df: Historical reference DataFrame (output of
+            score_calibration.build_normalization_reference, with columns
+            season, archetype, mean_raw_score) used to compute the
+            normalization denominator. If None, the mean of raw_scores itself
+            is used (in-sample normalization).
 
     Returns:
-        Series of Injury Risk+ scores (mean ≈ 100).
+        Series of Injury Risk+ scores (mean ≈ 100 within the reference group).
     """
-    raise NotImplementedError
+    denom = None
+    if reference_df is not None:
+        ref = reference_df[reference_df["season"] == season]
+        if archetype is not None:
+            ref = ref[ref["archetype"] == archetype]
+        if len(ref) > 0:
+            denom = float(ref["mean_raw_score"].mean())
+
+    if denom is None or denom == 0:
+        denom = float(raw_scores.mean())
+    if denom == 0 or not np.isfinite(denom):
+        denom = 1.0
+
+    return (raw_scores.astype(float) / denom) * 100.0
 
 
 def compute_seasonal_risk_plus(
     master_df: pd.DataFrame,
     model_dict: dict[str, object],
+    weights: dict[str, float] | None = None,
+    survival_model: object | None = None,
 ) -> pd.DataFrame:
     """Compute Injury Risk+ for all pitchers for each season in the dataset.
 
@@ -78,13 +147,57 @@ def compute_seasonal_risk_plus(
 
     Args:
         master_df: Master modeling DataFrame.
-        model_dict: Dictionary of fitted model objects from multitask_models.
+        model_dict: Dictionary of fitted task models from multitask_models
+            (output of train_chained_multitask_model / train_shared_representation_model,
+            or a dict already keyed by task name).
+        weights: Optional blend-weight override (see compute_raw_risk_score).
+        survival_model: Optional fitted survival model (from survival_models)
+            used to derive the hazard-rate component. If None, the hazard
+            component is omitted from the blend.
 
     Returns:
         DataFrame with columns: pitcher_id, season, injury_risk_plus,
         raw_risk_score, archetype, plus all component scores.
     """
-    raise NotImplementedError
+    from src.models.multitask_models import predict_all_tasks
+    from src.models.baseline_models import _infer_feature_cols
+    from src.scoring.score_calibration import build_normalization_reference
+
+    feature_cols = _infer_feature_cols(master_df)
+    X = master_df[feature_cols]
+
+    task_preds = predict_all_tasks(model_dict, X)
+
+    components = pd.DataFrame(index=master_df.index)
+    components["injury_prob_30d"] = task_preds.get("injured_next_30d_pred", np.nan)
+    components["expected_days_lost"] = task_preds.get("next_injury_days_lost_pred", np.nan)
+
+    if survival_model is not None:
+        from src.models.survival_models import predict_survival_function
+        surv = predict_survival_function(survival_model, X, time_points=[30])
+        # Hazard proxy: probability of an event by day 30 == 1 - S(30).
+        components["hazard_rate"] = 1.0 - surv["S(30)"].values
+
+    risk_df = master_df[["pitcher", "season"]].copy()
+    risk_df = risk_df.rename(columns={"pitcher": "pitcher_id"})
+    risk_df["archetype"] = _archetype_for(master_df).values
+    for col in components.columns:
+        risk_df[col] = components[col].values
+
+    risk_df = compute_raw_risk_score(risk_df, weights=weights)
+
+    # Build the normalization reference from this same population (in-sample),
+    # then apply it group-wise so each season-archetype group means ~100.
+    reference_df = build_normalization_reference(risk_df)
+
+    irp = pd.Series(index=risk_df.index, dtype=float)
+    for (season, archetype), group in risk_df.groupby(["season", "archetype"], observed=True):
+        irp.loc[group.index] = normalize_to_injury_risk_plus(
+            group["raw_risk_score"], season=season, archetype=archetype, reference_df=reference_df,
+        )
+    risk_df["injury_risk_plus"] = irp
+
+    return risk_df
 
 
 def get_top_risk_pitchers(
@@ -104,7 +217,10 @@ def get_top_risk_pitchers(
     Returns:
         DataFrame of top-N pitchers sorted by Injury Risk+ descending.
     """
-    raise NotImplementedError
+    df = risk_df[risk_df["season"] == season]
+    if archetype is not None:
+        df = df[df["archetype"] == archetype]
+    return df.sort_values("injury_risk_plus", ascending=False).head(n).reset_index(drop=True)
 
 
 def compute_risk_percentile(risk_df: pd.DataFrame) -> pd.DataFrame:
@@ -118,4 +234,9 @@ def compute_risk_percentile(risk_df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         risk_df with new column risk_percentile.
     """
-    raise NotImplementedError
+    out = risk_df.copy()
+    out["risk_percentile"] = (
+        out.groupby(["season", "archetype"], observed=True)["injury_risk_plus"]
+        .rank(pct=True, method="average") * 100.0
+    )
+    return out

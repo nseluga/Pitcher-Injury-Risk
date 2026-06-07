@@ -20,7 +20,13 @@ Key concepts:
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+from sklearn.impute import SimpleImputer
+
+from src.models.baseline_models import _infer_feature_cols
+
+DEFAULT_HORIZON_DAYS = 90
 
 
 def prepare_survival_dataset(
@@ -33,6 +39,11 @@ def prepare_survival_dataset(
     Formats the master dataset for lifelines / scikit-survival, constructing
     the (duration, event_observed) pair for each pitcher-game row.
 
+    `days_to_next_injury` is the duration to the next IL placement. Rows for
+    which no future injury is observed within the dataset's horizon are
+    right-censored: duration is capped at DEFAULT_HORIZON_DAYS and the event
+    indicator is 0.
+
     Args:
         master_df: Master modeling DataFrame with injury label columns.
         feature_cols: Feature columns to include.
@@ -42,7 +53,47 @@ def prepare_survival_dataset(
         Tuple of (X_train, X_test, T_train, T_test, E_train, E_test) where
         T is duration and E is the event indicator.
     """
-    raise NotImplementedError
+    if feature_cols is None:
+        feature_cols = _infer_feature_cols(master_df)
+
+    df = master_df.copy()
+
+    has_event = df["days_to_next_injury"].notna() & (df["days_to_next_injury"] <= DEFAULT_HORIZON_DAYS)
+    duration = df["days_to_next_injury"].where(has_event, DEFAULT_HORIZON_DAYS)
+    duration = duration.clip(lower=1)  # lifelines/scikit-survival require strictly positive durations
+
+    df["_duration"] = duration.astype(float)
+    df["_event"] = has_event.astype(int)
+
+    seasons = sorted(df["season"].unique())
+    if test_seasons is None:
+        test_seasons = seasons[-2:] if len(seasons) > 1 else seasons[-1:]
+    is_test = df["season"].isin(test_seasons)
+
+    train_df, test_df = df.loc[~is_test], df.loc[is_test]
+
+    X_train = train_df[feature_cols].copy()
+    X_test = test_df[feature_cols].copy()
+    T_train, T_test = train_df["_duration"].copy(), test_df["_duration"].copy()
+    E_train, E_test = train_df["_event"].copy(), test_df["_event"].copy()
+
+    return X_train, X_test, T_train, T_test, E_train, E_test
+
+
+def _impute(X_train: pd.DataFrame, X_test: pd.DataFrame | None = None):
+    """Median-impute features (lifelines/scikit-survival cannot handle NaNs)."""
+    imputer = SimpleImputer(strategy="median")
+    X_train_imp = pd.DataFrame(imputer.fit_transform(X_train), columns=X_train.columns, index=X_train.index)
+    if X_test is None:
+        return X_train_imp, imputer
+    X_test_imp = pd.DataFrame(imputer.transform(X_test), columns=X_test.columns, index=X_test.index)
+    return X_train_imp, X_test_imp, imputer
+
+
+def _drop_zero_variance(X: pd.DataFrame) -> pd.DataFrame:
+    """Drop constant columns — they break Cox/AFT design-matrix inversion."""
+    keep = X.columns[X.nunique(dropna=False) > 1]
+    return X[keep]
 
 
 def train_cox_ph(
@@ -58,9 +109,24 @@ def train_cox_ph(
         E_train: Event indicator (1 = injured, 0 = censored).
 
     Returns:
-        Fitted lifelines CoxPHFitter object.
+        Fitted lifelines CoxPHFitter object. The imputer used to fill missing
+        values is stashed on `model._imputer_` and the trained column order on
+        `model._feature_cols_` so downstream prediction can replicate preprocessing.
     """
-    raise NotImplementedError
+    from lifelines import CoxPHFitter
+
+    X_imp, imputer = _impute(X_train)
+    X_imp = _drop_zero_variance(X_imp)
+
+    fit_df = X_imp.copy()
+    fit_df["_duration"] = T_train.values
+    fit_df["_event"] = E_train.values
+
+    model = CoxPHFitter(penalizer=0.1)
+    model.fit(fit_df, duration_col="_duration", event_col="_event")
+    model._imputer_ = imputer
+    model._feature_cols_ = list(X_imp.columns)
+    return model
 
 
 def train_aft_model(
@@ -79,9 +145,31 @@ def train_aft_model(
             'loglogistic').
 
     Returns:
-        Fitted lifelines AFT model object.
+        Fitted lifelines AFT model object, with `_imputer_`/`_feature_cols_`
+        attached as in train_cox_ph.
     """
-    raise NotImplementedError
+    from lifelines import LogLogisticAFTFitter, LogNormalAFTFitter, WeibullAFTFitter
+
+    fitters = {
+        "weibull": WeibullAFTFitter,
+        "lognormal": LogNormalAFTFitter,
+        "loglogistic": LogLogisticAFTFitter,
+    }
+    if distribution not in fitters:
+        raise ValueError(f"Unknown distribution: {distribution!r} (expected one of {list(fitters)})")
+
+    X_imp, imputer = _impute(X_train)
+    X_imp = _drop_zero_variance(X_imp)
+
+    fit_df = X_imp.copy()
+    fit_df["_duration"] = T_train.values
+    fit_df["_event"] = E_train.values
+
+    model = fitters[distribution](penalizer=0.1)
+    model.fit(fit_df, duration_col="_duration", event_col="_event")
+    model._imputer_ = imputer
+    model._feature_cols_ = list(X_imp.columns)
+    return model
 
 
 def train_random_survival_forest(
@@ -100,9 +188,41 @@ def train_random_survival_forest(
         E_train: Event indicator series.
 
     Returns:
-        Fitted scikit-survival RandomSurvivalForest object.
+        Fitted scikit-survival RandomSurvivalForest object, with
+        `_imputer_`/`_feature_cols_` attached.
     """
-    raise NotImplementedError
+    from sksurv.ensemble import RandomSurvivalForest
+
+    X_imp, imputer = _impute(X_train)
+    X_imp = _drop_zero_variance(X_imp)
+
+    y = np.array(
+        [(bool(e), t) for e, t in zip(E_train.values, T_train.values)],
+        dtype=[("event", bool), ("time", float)],
+    )
+
+    model = RandomSurvivalForest(
+        n_estimators=200,
+        max_depth=6,
+        min_samples_leaf=15,
+        n_jobs=-1,
+        random_state=42,
+    )
+    model.fit(X_imp, y)
+    model._imputer_ = imputer
+    model._feature_cols_ = list(X_imp.columns)
+    return model
+
+
+def _prepare_X_for_predict(model: object, X: pd.DataFrame) -> pd.DataFrame:
+    """Replay the imputation/column-selection used at training time."""
+    imputer = getattr(model, "_imputer_", None)
+    feature_cols = getattr(model, "_feature_cols_", list(X.columns))
+    if imputer is not None:
+        X_imp = pd.DataFrame(imputer.transform(X), columns=X.columns, index=X.index)
+    else:
+        X_imp = X
+    return X_imp[feature_cols]
 
 
 def predict_survival_function(
@@ -122,7 +242,20 @@ def predict_survival_function(
     """
     if time_points is None:
         time_points = [30, 60, 90]
-    raise NotImplementedError
+
+    X_imp = _prepare_X_for_predict(model, X)
+
+    type_name = type(model).__name__
+    if type_name == "RandomSurvivalForest":
+        surv_funcs = model.predict_survival_function(X_imp)
+        data = {f"S({t})": [float(fn(t)) for fn in surv_funcs] for t in time_points}
+    else:
+        # lifelines Cox/AFT models share `predict_survival_function`, returning
+        # a (times x n_samples) DataFrame.
+        surv_df = model.predict_survival_function(X_imp, times=time_points)
+        data = {f"S({t})": surv_df.loc[t].values for t in time_points}
+
+    return pd.DataFrame(data, index=X.index)
 
 
 def compute_concordance_index(
@@ -145,4 +278,18 @@ def compute_concordance_index(
     Returns:
         C-index float.
     """
-    raise NotImplementedError
+    from lifelines.utils import concordance_index
+
+    X_imp = _prepare_X_for_predict(model, X_test)
+    type_name = type(model).__name__
+
+    if type_name == "RandomSurvivalForest":
+        risk_scores = model.predict(X_imp)  # higher = higher risk
+        return float(concordance_index(T_test, -risk_scores, E_test))
+
+    # lifelines models expose partial_hazard / median survival time as a
+    # risk proxy; predict_expectation gives expected survival time (lower
+    # expected survival time == higher risk), which concordance_index expects
+    # as the "predicted_scores" argument with the sign convention below.
+    predicted_time = model.predict_expectation(X_imp)
+    return float(concordance_index(T_test, predicted_time, E_test))
