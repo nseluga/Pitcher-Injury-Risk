@@ -2,38 +2,90 @@
 velocity_features.py
 
 Extracts velocity-based features from Statcast pitch-level data.
-Velocity changes — particularly spikes and declines — have been associated
-with arm stress and are a key component of injury risk modeling.
+Velocity changes — particularly declines — have been associated with arm
+stress and are a key component of injury risk modeling.
 
 Feature categories:
 - Mean and max fastball velocity per game
-- Rolling velocity trends (7 / 15 / 30 day windows)
-- Velocity change vs. season average (delta)
-- Velocity spikes (single-game jumps above threshold)
-- Velocity decline curves (late-season decay patterns)
-- Velocity differential between pitch types (FB vs. breaking ball gap)
-- Intra-game velocity drop (first inning vs. last inning)
+- Rolling velocity trends (7 / 30 / 90 day windows)
+- Velocity change vs. rolling baseline (delta features)
+- Intra-game velocity drop (first vs. last inning)
 """
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+
+FASTBALL_TYPES = {"FF", "SI", "FC"}
 
 
 def compute_game_velocity_stats(pitch_df: pd.DataFrame) -> pd.DataFrame:
-    """Compute mean, max, min, and std of release_speed per game per pitcher.
+    """Compute per-game fastball velocity summary statistics per pitcher.
 
-    Aggregates pitch-level velocity data to the game grain, split by pitch
-    type so fastball, slider, and changeup velocities are tracked separately.
+    Aggregates pitch-level velocity data to the game grain, tracking fastball
+    mean, max, and std. Non-fastball pitches are excluded so the metric
+    reflects arm speed rather than pitch selection.
 
     Args:
-        pitch_df: Pitch-level DataFrame with columns pitcher_id, game_date,
-            pitch_type, release_speed.
+        pitch_df: Pitch-level DataFrame with columns pitcher (int), game_date
+            (datetime), pitch_type (str), release_speed (float).
 
     Returns:
-        Game-level DataFrame with velocity summary columns per pitch type.
+        Game-level DataFrame with columns:
+            pitcher, game_date, fb_velo_mean, fb_velo_max, fb_velo_std,
+            fb_count, all_velo_mean.
     """
-    raise NotImplementedError
+    df = pitch_df.copy()
+    df["game_date"] = pd.to_datetime(df["game_date"])
+
+    # Fastball-only subset
+    fb = df[df["pitch_type"].isin(FASTBALL_TYPES)]
+
+    fb_stats = (
+        fb.groupby(["pitcher", "game_date"])["release_speed"]
+        .agg(fb_velo_mean="mean", fb_velo_max="max", fb_velo_std="std",
+             fb_count="count")
+        .reset_index()
+    )
+
+    # All-pitch mean (for context)
+    all_stats = (
+        df.groupby(["pitcher", "game_date"])["release_speed"]
+        .mean()
+        .reset_index(name="all_velo_mean")
+    )
+
+    # Intra-game velocity drop: first two innings vs. last two innings
+    inning_col = "inning" if "inning" in df.columns else None
+    if inning_col:
+        early = df[df[inning_col] <= 2]
+        late  = df[df[inning_col] >= (df[inning_col].max() - 1)]
+        early_velo = (
+            early[early["pitch_type"].isin(FASTBALL_TYPES)]
+            .groupby(["pitcher", "game_date"])["release_speed"]
+            .mean()
+            .reset_index(name="fb_velo_early_innings")
+        )
+        late_velo = (
+            late[late["pitch_type"].isin(FASTBALL_TYPES)]
+            .groupby(["pitcher", "game_date"])["release_speed"]
+            .mean()
+            .reset_index(name="fb_velo_late_innings")
+        )
+        inning_drop = early_velo.merge(late_velo, on=["pitcher", "game_date"], how="outer")
+        inning_drop["intragame_velo_drop"] = (
+            inning_drop["fb_velo_early_innings"] - inning_drop["fb_velo_late_innings"]
+        )
+    else:
+        inning_drop = None
+
+    out = fb_stats.merge(all_stats, on=["pitcher", "game_date"], how="outer")
+    if inning_drop is not None:
+        out = out.merge(inning_drop[["pitcher", "game_date", "intragame_velo_drop"]],
+                        on=["pitcher", "game_date"], how="left")
+
+    return out
 
 
 def compute_rolling_velocity(
@@ -42,75 +94,89 @@ def compute_rolling_velocity(
 ) -> pd.DataFrame:
     """Compute rolling average fastball velocity over multiple time windows.
 
+    Uses closed='left' so each row reflects velocity in the days *before*
+    the current appearance — a proper leading indicator.
+
     Args:
-        game_df: Game-level velocity DataFrame from compute_game_velocity_stats.
-        windows: List of lookback windows in days. Defaults to [7, 15, 30].
+        game_df: Game-level velocity DataFrame containing fb_velo_mean.
+        windows: Lookback windows in days. Defaults to [7, 30, 90].
 
     Returns:
-        game_df with new columns velo_fb_mean_last_{N}d for each window N.
+        game_df with new columns fb_velo_{N}d_avg for each window N.
     """
     if windows is None:
-        windows = [7, 15, 30]
-    raise NotImplementedError
+        windows = [7, 30, 90]
+
+    if "fb_velo_mean" not in game_df.columns:
+        raise ValueError("game_df must contain fb_velo_mean. "
+                         "Run compute_game_velocity_stats first.")
+
+    df = game_df.copy()
+    df["game_date"] = pd.to_datetime(df["game_date"])
+    df_s = df.sort_values(["pitcher", "game_date"]).set_index("game_date")
+
+    for w in windows:
+        result = (
+            df_s.groupby("pitcher")["fb_velo_mean"]
+            .rolling(f"{w}D", min_periods=1, closed="left")
+            .mean()
+            .reset_index()
+        )
+        result.columns = ["pitcher", "game_date", f"fb_velo_{w}d_avg"]
+        df = df.merge(result, on=["pitcher", "game_date"], how="left")
+
+    return df
 
 
 def compute_velocity_delta(game_df: pd.DataFrame) -> pd.DataFrame:
-    """Compute the change in fastball velocity relative to the season average.
+    """Compute velocity change relative to rolling baselines.
 
-    For each game, subtracts the pitcher's season-to-date mean velocity from
-    the current game's velocity to capture deviations from baseline.
-
-    Args:
-        game_df: Game-level velocity DataFrame with rolling velocity columns.
-
-    Returns:
-        game_df with new column velo_delta_vs_season_avg.
-    """
-    raise NotImplementedError
-
-
-def flag_velocity_spikes(
-    game_df: pd.DataFrame,
-    spike_threshold_mph: float = 2.0,
-) -> pd.DataFrame:
-    """Flag games where a pitcher's velocity exceeded their rolling mean by a threshold.
-
-    Velocity spikes may indicate unusual arm effort. This feature captures
-    single-game outliers that might otherwise be smoothed away in rolling averages.
+    Captures velocity decline — a leading indicator of arm fatigue. Three
+    delta features measure change over different time horizons:
+        velo_change_7_30d:  this week vs. prior 30 days
+        velo_change_30_90d: prior 30 days vs. prior 90 days
 
     Args:
-        game_df: Game-level velocity DataFrame.
-        spike_threshold_mph: MPH above the 30-day rolling mean to qualify as
-            a spike. Default is 2.0 mph.
+        game_df: Game-level velocity DataFrame with rolling velocity columns
+            produced by compute_rolling_velocity.
 
     Returns:
-        game_df with new boolean column velocity_spike.
+        game_df with velocity change columns appended.
     """
-    raise NotImplementedError
+    df = game_df.copy()
 
+    if "fb_velo_7d_avg" in df.columns and "fb_velo_30d_avg" in df.columns:
+        df["velo_change_7_30d"] = df["fb_velo_7d_avg"] - df["fb_velo_30d_avg"]
 
-def compute_intragame_velocity_drop(pitch_df: pd.DataFrame) -> pd.DataFrame:
-    """Measure velocity loss within a single appearance (first vs. last inning).
+    if "fb_velo_30d_avg" in df.columns and "fb_velo_90d_avg" in df.columns:
+        df["velo_change_30_90d"] = df["fb_velo_30d_avg"] - df["fb_velo_90d_avg"]
 
-    Computes the difference between mean fastball velocity in the first inning
-    and the last inning of each appearance, as a proxy for fatigue within a game.
+    # Season-to-date baseline velocity (cumulative mean from season start)
+    df_s = df.sort_values(["pitcher", "game_date"]).set_index("game_date")
+    season_avg = (
+        df_s.groupby("pitcher")["fb_velo_mean"]
+        .expanding(min_periods=3)
+        .mean()
+        .reset_index()
+    )
+    season_avg.columns = ["pitcher", "game_date", "fb_velo_season_avg"]
+    df = df.merge(season_avg, on=["pitcher", "game_date"], how="left")
+    df["velo_delta_vs_season"] = df["fb_velo_mean"] - df["fb_velo_season_avg"]
 
-    Args:
-        pitch_df: Pitch-level DataFrame with inning and velocity columns.
-
-    Returns:
-        Game-level DataFrame with new column intragame_velo_drop.
-    """
-    raise NotImplementedError
+    return df
 
 
 def build_velocity_features(pitch_df: pd.DataFrame) -> pd.DataFrame:
     """Orchestrate all velocity feature computations.
 
     Args:
-        pitch_df: Raw pitch-level Statcast DataFrame.
+        pitch_df: Raw pitch-level Statcast DataFrame with pitcher, game_date,
+            pitch_type, release_speed, and optionally inning columns.
 
     Returns:
         Game-level DataFrame with all velocity feature columns.
     """
-    raise NotImplementedError
+    game_velo = compute_game_velocity_stats(pitch_df)
+    game_velo = compute_rolling_velocity(game_velo, windows=[7, 30, 90])
+    game_velo = compute_velocity_delta(game_velo)
+    return game_velo

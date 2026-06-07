@@ -176,6 +176,8 @@ pitcher_season = (
         avg_extension  = ('avg_extension', 'mean'),
         avg_pfx_x      = ('avg_pfx_x',     'mean'),
         avg_pfx_z      = ('avg_pfx_z',     'mean'),
+        avg_rel_x      = ('avg_rel_x',     'mean'),
+        avg_rel_z      = ('avg_rel_z',     'mean'),
         rel_x_std      = ('std_rel_x',     'mean'),
         rel_z_std      = ('std_rel_z',     'mean'),
         fb_pct         = ('fb_pct',        'mean'),
@@ -1686,9 +1688,10 @@ for _, row in weak.iterrows():
 C40_SAVE = """\
 # ── Save EDA outputs ─────────────────────────────────────────────────────────
 # 1) Pitcher-season feature matrix (with labels)
-out_cols = [c for c in feature_cols + ['pitcher', 'player_name', 'role',
-                                         'age', 'injured_future']
-            if c in pitcher_season.columns]
+out_cols = list(dict.fromkeys(
+    c for c in feature_cols + ['pitcher', 'player_name', 'role', 'age', 'injured_future']
+    if c in pitcher_season.columns
+))
 pitcher_season[out_cols].to_parquet(
     PROCESSED_DIR / 'pitcher_eda_features.parquet', index=False
 )
