@@ -1,37 +1,25 @@
-You are working on my Pitcher Injury Risk+ project.
+Run the full-data pipeline now.
 
-First, do not immediately start coding. Read the project outlines, README files, notebook plans, existing notebooks, and any implementation notes. Determine the intended notebook sequence and the remaining work up through Notebook 9.
+Execute Notebook 01 on the full dataset and wait for completion.
 
-Before continuing, specifically assess whether any earlier notebooks were run only on test/sample data and need to be rerun on the full non-test dataset for conceptual correctness. If yes, rerun those notebooks or regenerate their outputs before building later notebooks. If no, explain briefly why the existing outputs are conceptually sufficient.
+Then execute Notebooks 02, 03, 04, and 05 using the regenerated outputs.
 
-Then proceed notebook by notebook, in order, through Notebook 9.
+Then execute Notebooks 06, 07, 08, and 09 in sequence.
 
-For each remaining notebook:
+For each notebook:
 
-1. Read the relevant outline/plan.
-2. Identify required inputs and expected outputs.
-3. Write or complete the notebook code.
-4. Prefer test mode/sample mode for quick debugging when appropriate, but make sure the final notebook logic is valid for the full dataset.
-5. Execute the notebook or its core code path.
-6. If errors occur, inspect the traceback, fix the root cause, and rerun.
-7. Repeat until the notebook runs successfully or you hit a true blocker.
-8. Save generated data, figures, models, and outputs in the intended project locations.
-9. Add clear markdown explanations inside notebooks.
+- Run it
+- Inspect errors
+- Fix bugs
+- Rerun
+- Repeat until successful or truly blocked
 
-Constraints:
+Stop after Notebook 09.
+Do not continue to Notebook 10 or later.
 
-* Make the smallest necessary changes.
-* Preserve project structure.
-* Do not delete files.
-* Do not modify secrets or environment configuration.
-* Do not install packages unless absolutely necessary.
-* Keep test outputs separate from full-data outputs.
-* Make reasonable decisions instead of stopping on minor ambiguities.
+Produce a final summary of:
 
-At the end, provide:
-
-* Notebooks completed
-* Notebooks executed successfully
-* Earlier notebooks rerun (if any)
-* Remaining blockers
-* Recommended next review steps
+- Notebooks completed
+- Bugs fixed
+- Outputs generated
+- Remaining blockers
