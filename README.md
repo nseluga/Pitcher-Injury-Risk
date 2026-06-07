@@ -136,7 +136,14 @@ Pitcher-Injury-Risk/
 - [ ] SHAP-based feature attribution
 - [ ] Partial dependence and interaction effects
 
-### Phase 6 — Simulation and Optimization
+### Phase 6 — Baseball-Specific Insights
+- [ ] Risk vs. pitch mix, velocity, workload, and rest analysis
+- [ ] Two-dimensional risk interaction heatmaps (danger zones)
+- [ ] Pitcher archetype and role-based risk profiles
+- [ ] Pre-injury risk trajectory analysis
+- [ ] Novel insight candidate table
+
+### Phase 7 — Simulation and Optimization
 - [ ] Workload simulator
 - [ ] Pitch mix simulator
 - [ ] Full usage strategy optimizer

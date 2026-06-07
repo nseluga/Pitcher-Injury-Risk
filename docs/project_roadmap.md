@@ -134,7 +134,33 @@ This document tracks the development phases of the Pitcher Injury Risk+ modeling
 
 ---
 
-## Phase 8: Usage Strategy Simulation
+## Phase 8: Baseball-Specific Insights
+
+**Goal:** Translate model outputs and interpretability results into baseball-relevant conclusions about pitcher health, usage strategy, risk archetypes, and nonlinear danger zones.
+
+**Milestones:**
+- [ ] Risk+ distribution characterization
+- [ ] Risk vs. pitch mix analysis (slider, breaking ball, fastball)
+- [ ] Risk vs. velocity and velocity change analysis
+- [ ] Risk vs. workload and ACWR danger zones
+- [ ] Risk vs. rest and recovery patterns
+- [ ] Two-dimensional risk interaction heatmaps
+- [ ] Pitcher archetype risk profiles
+- [ ] Role-based risk comparison
+- [ ] Performance vs. risk frontier
+- [ ] Pre-injury risk trajectory analysis
+- [ ] Novel insight candidate table
+
+**Outputs:**
+- `notebooks/11_baseball_specific_insights.ipynb`
+- `reports/figures/risk_vs_*.png`
+- `reports/figures/risk_heatmap_*.png`
+- `reports/figures/risk_by_*.png`
+- `reports/tables/baseball_specific_insights_summary.csv`
+
+---
+
+## Phase 9: Usage Strategy Simulation
 
 **Goal:** Answer counterfactual and optimization questions using the trained models to simulate alternative usage strategies.
 
@@ -147,12 +173,12 @@ This document tracks the development phases of the Pitcher Injury Risk+ modeling
 - [ ] Archetype comparison (traditional starter vs. hybrid)
 
 **Outputs:**
-- `notebooks/11_usage_strategy_simulation.ipynb`
+- `notebooks/12_usage_strategy_simulation.ipynb`
 - `reports/tables/simulation_results.csv`
 
 ---
 
-## Phase 9: Dashboard
+## Phase 10: Dashboard
 
 **Goal:** Build an interactive dashboard for exploring pitcher risk scores, trends, and simulation results.
 
@@ -164,5 +190,5 @@ This document tracks the development phases of the Pitcher Injury Risk+ modeling
 - [ ] Deployment plan (Streamlit / Dash / static site)
 
 **Outputs:**
-- `notebooks/12_dashboard.ipynb`
+- `notebooks/13_dashboard.ipynb`
 - Deployed dashboard (TBD)
