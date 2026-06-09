@@ -258,13 +258,17 @@ class _NaiveBaseline:
             p = np.full(len(X), self.global_rate_)
         else:
             grp = X.copy()
-            grp["_age_band"] = self._age_band(grp["age"])
             grp["_archetype"] = _rule_based_archetype(grp)
-            keys = list(zip(grp["_archetype"], grp["_age_band"]))
-            p = np.array([
-                self.group_rates_.get(k, self.global_rate_) for k in keys
-            ], dtype=float)
-            p = np.where(np.isnan(p), self.global_rate_, p)
+            if "age" in grp.columns:
+                grp["_age_band"] = self._age_band(grp["age"])
+                keys = list(zip(grp["_archetype"], grp["_age_band"]))
+                p = np.array([
+                    self.group_rates_.get(k, self.global_rate_) for k in keys
+                ], dtype=float)
+                p = np.where(np.isnan(p), self.global_rate_, p)
+            else:
+                # age not in X (excluded as metadata) — fall back to archetype-only rate
+                p = np.array([self.global_rate_] * len(grp), dtype=float)
 
         p = np.clip(p, 1e-6, 1 - 1e-6)
         return np.column_stack([1 - p, p])
