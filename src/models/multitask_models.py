@@ -25,6 +25,7 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import LabelEncoder
 
 from src.models.baseline_models import _infer_feature_cols
 
@@ -184,6 +185,30 @@ def train_shared_representation_model(
     return _SharedRepresentationModel(shared_model_type=shared_model_type).fit(X_train, y_train_dict)
 
 
+class _LabelEncodedClassifier:
+    """Wraps a classifier with a LabelEncoder for string multiclass targets.
+
+    XGBClassifier requires class labels to be contiguous integers starting
+    at 0; `next_injury_type` is a string column. predict() decodes back to
+    the original string labels so downstream code is agnostic to the wrapper.
+    """
+
+    def __init__(self, estimator):
+        self.estimator = estimator
+        self.encoder = LabelEncoder()
+
+    def fit(self, X, y):
+        y_enc = self.encoder.fit_transform(y)
+        self.estimator.fit(X, y_enc)
+        return self
+
+    def predict(self, X):
+        return self.encoder.inverse_transform(self.estimator.predict(X))
+
+    def predict_proba(self, X):
+        return self.estimator.predict_proba(X)
+
+
 class _SharedRepresentationModel:
     """Shared imputer/scaler trunk with independent per-task heads.
 
@@ -195,7 +220,10 @@ class _SharedRepresentationModel:
 
     def __init__(self, shared_model_type: str = "gradient_boosting"):
         self.shared_model_type = shared_model_type
-        self.imputer = SimpleImputer(strategy="median")
+        # keep_empty_features=True: an all-NaN column (e.g. intragame_velo_drop)
+        # would otherwise be silently dropped, breaking the column-name
+        # reattachment in fit()/transform() below.
+        self.imputer = SimpleImputer(strategy="median", keep_empty_features=True)
         self.tasks: dict[str, object] = {}
 
     def _make_classifier(self):
@@ -247,7 +275,7 @@ class _SharedRepresentationModel:
             if y_sub.nunique() < 2:
                 self.tasks[task] = None
                 continue
-            est = self._make_classifier()
+            est = _LabelEncodedClassifier(self._make_classifier())
             est.fit(X_sub, y_sub)
             self.tasks[task] = est
 

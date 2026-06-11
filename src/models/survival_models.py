@@ -81,8 +81,15 @@ def prepare_survival_dataset(
 
 
 def _impute(X_train: pd.DataFrame, X_test: pd.DataFrame | None = None):
-    """Median-impute features (lifelines/scikit-survival cannot handle NaNs)."""
-    imputer = SimpleImputer(strategy="median")
+    """Median-impute features (lifelines/scikit-survival cannot handle NaNs).
+
+    `keep_empty_features=True` so all-NaN columns (e.g. `intragame_velo_drop`,
+    which is currently all-NaN across the full feature matrix) are kept as a
+    constant 0 column rather than silently dropped — preserving the column
+    count expected when reattaching `X_train.columns`. `_drop_zero_variance`
+    removes the resulting constant columns afterwards.
+    """
+    imputer = SimpleImputer(strategy="median", keep_empty_features=True)
     X_train_imp = pd.DataFrame(imputer.fit_transform(X_train), columns=X_train.columns, index=X_train.index)
     if X_test is None:
         return X_train_imp, imputer

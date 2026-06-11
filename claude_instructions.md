@@ -4,13 +4,13 @@ You are working on the `Pitcher-Injury-Risk` project.
 
 The goal is to finish, debug, optimize, and validate the following notebooks:
 
-* `05_feature_engineering.ipynb`
-* `06_baseline_models.ipynb`
-* `07_survival_models.ipynb`
-* `08_multitask_models.ipynb`
-* `09_risk_score_construction.ipynb`
+- `05_feature_engineering.ipynb`
+- `06_baseline_models.ipynb`
+- `07_survival_models.ipynb`
+- `08_multitask_models.ipynb`
+- `09_risk_score_construction.ipynb`
 
-Do not work on notebooks 10–12 yet.
+By the end of your run each of these should be able to run as intended. Do not work on notebooks 10–12 yet.
 
 ---
 
@@ -46,11 +46,11 @@ Do not load the entire pitch-level dataset into memory if avoidable.
 
 Use:
 
-* batching
-* checkpointing
-* parquet storage
-* memory logging
-* garbage collection
+- batching
+- checkpointing
+- parquet storage
+- memory logging
+- garbage collection
 
 The project must be capable of running on a laptop.
 
@@ -155,73 +155,73 @@ data/processed/feature_matrix.parquet
 
 Examples:
 
-* pitches per outing
-* appearances last 7 days
-* pitches last 7 days
-* pitches last 30 days
-* acute workload
-* chronic workload
-* ACWR
-* days rest
-* short-rest flag
-* consecutive appearances
+- pitches per outing
+- appearances last 7 days
+- pitches last 7 days
+- pitches last 30 days
+- acute workload
+- chronic workload
+- ACWR
+- days rest
+- short-rest flag
+- consecutive appearances
 
 ### Velocity
 
 Examples:
 
-* avg fastball velocity
-* max fastball velocity
-* velocity trends
-* velocity loss from peak
-* velocity spike flags
+- avg fastball velocity
+- max fastball velocity
+- velocity trends
+- velocity loss from peak
+- velocity spike flags
 
 ### Pitch Mix
 
 Examples:
 
-* fastball %
-* slider %
-* breaking ball %
-* offspeed %
-* pitch mix entropy
-* pitch mix changes
+- fastball %
+- slider %
+- breaking ball %
+- offspeed %
+- pitch mix entropy
+- pitch mix changes
 
 ### Movement / Mechanics Proxies
 
 Examples:
 
-* release height
-* release side
-* extension
-* horizontal break
-* vertical break
-* spin rate
-* release point drift
-* movement drift
-* spin drift
+- release height
+- release side
+- extension
+- horizontal break
+- vertical break
+- spin rate
+- release point drift
+- movement drift
+- spin drift
 
 ### Injury History
 
 Examples:
 
-* prior injuries
-* prior IL stints
-* prior days missed
-* prior severe injury flag
-* days since injury
+- prior injuries
+- prior IL stints
+- prior days missed
+- prior severe injury flag
+- days since injury
 
 ## Label Construction
 
 Create:
 
-* injury within 30 days
-* injury within 60 days
-* injury within 90 days
-* injury within 180 days
-* days until injury
-* expected days missed
-* severity class
+- injury within 30 days
+- injury within 60 days
+- injury within 90 days
+- injury within 180 days
+- days until injury
+- expected days missed
+- severity class
 
 Prevent future leakage.
 
@@ -231,13 +231,13 @@ Only use information available before the prediction date.
 
 Include:
 
-* matrix shape
-* feature counts
-* missingness summary
-* label distributions
-* memory summary
-* sample rows
-* saved-file confirmation
+- matrix shape
+- feature counts
+- missingness summary
+- label distributions
+- memory summary
+- sample rows
+- saved-file confirmation
 
 ---
 
@@ -268,25 +268,25 @@ reports/figures/*
 
 Train:
 
-* Logistic Regression
-* Random Forest
-* XGBoost (if available)
+- Logistic Regression
+- Random Forest
+- XGBoost (if available)
 
 ## Evaluation
 
 Include:
 
-* ROC AUC
-* PR AUC
-* Brier Score
-* Calibration
-* Confusion Matrix
-* Injured-class recall
+- ROC AUC
+- PR AUC
+- Brier Score
+- Calibration
+- Confusion Matrix
+- Injured-class recall
 
 Use:
 
-* class weights
-* scale_pos_weight where appropriate
+- class weights
+- scale_pos_weight where appropriate
 
 Use time-aware splitting if dates exist.
 
@@ -302,47 +302,47 @@ Add tuning for:
 
 Tune:
 
-* C
-* penalty
-* class_weight
+- C
+- penalty
+- class_weight
 
 ## Random Forest
 
 Tune:
 
-* n_estimators
-* max_depth
-* min_samples_split
-* min_samples_leaf
-* max_features
-* class_weight
+- n_estimators
+- max_depth
+- min_samples_split
+- min_samples_leaf
+- max_features
+- class_weight
 
 ## XGBoost
 
 Tune:
 
-* max_depth
-* learning_rate
-* n_estimators
-* subsample
-* colsample_bytree
-* min_child_weight
-* gamma
-* reg_alpha
-* reg_lambda
-* scale_pos_weight
+- max_depth
+- learning_rate
+- n_estimators
+- subsample
+- colsample_bytree
+- min_child_weight
+- gamma
+- reg_alpha
+- reg_lambda
+- scale_pos_weight
 
 Use:
 
-* RandomizedSearchCV first
-* GridSearchCV only for final refinement
+- RandomizedSearchCV first
+- GridSearchCV only for final refinement
 
 Metrics:
 
-* PR AUC
-* ROC AUC
-* Brier Score
-* Calibration
+- PR AUC
+- ROC AUC
+- Brier Score
+- Calibration
 
 Required outputs:
 
@@ -377,8 +377,8 @@ reports/figures/*
 
 Use:
 
-* Cox Proportional Hazards
-* Random Survival Forest if feasible
+- Cox Proportional Hazards
+- Random Survival Forest if feasible
 
 Handle censoring correctly.
 
@@ -386,10 +386,10 @@ Non-injured observations are censored, not permanently healthy.
 
 ## Metrics
 
-* Concordance Index
-* Risk stratification
-* Survival curves
-* Calibration if feasible
+- Concordance Index
+- Risk stratification
+- Survival curves
+- Calibration if feasible
 
 ---
 
@@ -399,20 +399,20 @@ Tune:
 
 ## Cox
 
-* penalizer
-* l1_ratio
+- penalizer
+- l1_ratio
 
 ## Random Survival Forest
 
-* n_estimators
-* max_depth
-* min_samples_split
-* min_samples_leaf
-* max_features
+- n_estimators
+- max_depth
+- min_samples_split
+- min_samples_leaf
+- max_features
 
 Metric:
 
-* Concordance Index
+- Concordance Index
 
 Outputs:
 
@@ -430,10 +430,10 @@ Predict multiple components of injury risk.
 
 ## Targets
 
-* injury probability
-* days missed
-* severity
-* time-to-injury
+- injury probability
+- days missed
+- severity
+- time-to-injury
 
 ## Outputs
 
@@ -446,9 +446,9 @@ reports/figures/*
 
 Acceptable implementations:
 
-* chained models
-* multi-output models
-* shared preprocessing with separate targets
+- chained models
+- multi-output models
+- shared preprocessing with separate targets
 
 Prioritize stability.
 
@@ -462,24 +462,24 @@ Metrics:
 
 ## Classification
 
-* PR AUC
-* ROC AUC
-* Recall
-* Brier Score
+- PR AUC
+- ROC AUC
+- Recall
+- Brier Score
 
 ## Regression
 
-* MAE
-* RMSE
+- MAE
+- RMSE
 
 ## Severity
 
-* Macro F1
-* Weighted F1
+- Macro F1
+- Weighted F1
 
 ## Survival
 
-* Concordance Index
+- Concordance Index
 
 Outputs:
 
@@ -506,9 +506,9 @@ Do not make tuning impossible to run.
 
 Use:
 
-* checkpoints
-* saved tuning results
-* limited search spaces
+- checkpoints
+- saved tuning results
+- limited search spaces
 
 ---
 
@@ -518,8 +518,8 @@ For tuned models:
 
 Apply calibration where appropriate:
 
-* Platt Scaling
-* Isotonic Regression
+- Platt Scaling
+- Isotonic Regression
 
 Generate calibration plots.
 
@@ -609,17 +609,17 @@ If weights are first-draft estimates, state so explicitly.
 
 Perform:
 
-* Distribution analysis
-* Leaderboards
-* Component breakdowns
-* Sensitivity testing
+- Distribution analysis
+- Leaderboards
+- Component breakdowns
+- Sensitivity testing
 
 Sanity checks:
 
-* Prior injuries generally increase risk
-* Missing values do not create extreme scores
-* Low workload does not create absurd risk
-* League average ≈ 100
+- Prior injuries generally increase risk
+- Missing values do not create extreme scores
+- Low workload does not create absurd risk
+- League average ≈ 100
 
 ---
 
@@ -642,11 +642,11 @@ reports/tables/risk_score_model_sources.csv
 
 Columns:
 
-* component
-* model file
-* tuned
-* validation metric
-* notes
+- component
+- model file
+- tuned
+- validation metric
+- notes
 
 ---
 
@@ -663,12 +663,12 @@ README.md
 
 Debug log must include:
 
-* errors found
-* fixes applied
-* assumptions
-* limitations
-* outputs created
-* rerun instructions
+- errors found
+- fixes applied
+- assumptions
+- limitations
+- outputs created
+- rerun instructions
 
 ---
 
@@ -676,12 +676,12 @@ Debug log must include:
 
 Do NOT:
 
-* allow leakage
-* use post-injury data in features
-* make causal claims
-* optimize for accuracy alone
-* silently drop data
-* fabricate labels
+- allow leakage
+- use post-injury data in features
+- make causal claims
+- optimize for accuracy alone
+- silently drop data
+- fabricate labels
 
 If labels are insufficient:
 
