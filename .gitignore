@@ -16,6 +16,10 @@ dist/
 env/
 venv/
 ENV/
+.venv_pkgs/
+
+# Scratch / debug scripts
+.scratch/
 
 # Jupyter
 .ipynb_checkpoints/
