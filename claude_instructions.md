@@ -1,4 +1,4 @@
-# Claude Instructions: Complete, Debug, Tune, and Validate Notebooks 5–9
+# Claude Instructions: Complete, Debug, Tune, and Validate Notebooks 5–13
 
 You are working on the `Pitcher-Injury-Risk` project.
 
@@ -9,8 +9,82 @@ The goal is to finish, debug, optimize, and validate the following notebooks:
 - `07_survival_models.ipynb`
 - `08_multitask_models.ipynb`
 - `09_risk_score_construction.ipynb`
+- `10_model_interpretability.ipynb`
+- `11_baseball_specific_insights.ipynb`
+- `12_usage_strategy_simulation.ipynb`
+- `13_dashboard.ipynb`
 
-By the end of your run each of these should be able to run as intended. Do not work on notebooks 10–12 yet.
+Notebooks 10, 12, and 13 are currently stubs (a markdown plan plus one import
+cell). They must be implemented from scratch following the plan already
+written in their first markdown cell, the roadmap in `docs/project_roadmap.md`,
+and the Notebook Style Guide below. Notebook 11 is written but unexecuted.
+
+---
+
+# Session Protocol (read this first, every session)
+
+You are one iteration of an outer loop (`run_project.sh`). Previous sessions
+may have already done part of the work; future sessions will pick up whatever
+you leave behind. Therefore:
+
+1. **Orient before doing anything.** Run:
+
+   ```bash
+   python scripts/verify_outputs.py
+   ```
+
+   Then read `.scratch/progress.json`, `docs/notebook_debug_log.md`, and
+   `.scratch/nb_execution_summary.json` if they exist. Do not re-derive
+   project state from scratch — trust the verifier and the logs.
+
+2. **Work on the FIRST failing notebook only.** Notebooks have a strict
+   dependency order (05 → 06 → 07 → 08 → 09 → 10 → 11 → 12 → 13). Fixing a
+   later notebook before an earlier one passes wastes work.
+
+3. **Debug on a sample, validate on the full data.** When iterating on a fix,
+   set `TEST_MODE = True` (or use a row sample) for fast cycles. Before
+   declaring the notebook done, run it end-to-end in full mode:
+
+   ```bash
+   python run_notebooks.py --only NN --fail-fast
+   ```
+
+4. **Verify, then commit.** A notebook is done when
+   `python scripts/verify_outputs.py --only NN` passes. Then immediately:
+   - append a debug-log entry (format in Documentation Requirements below)
+   - update `.scratch/progress.json`
+   - `git add` the notebook, any `src/` changes, and docs, and commit with a
+     message like `NB07 passing: survival models trained and verified`
+
+   Committing per-notebook means a bad fix in a later session can never
+   destroy passing work.
+
+5. **The verifier's manifest is the contract.** If a notebook's design
+   legitimately changes what files it outputs, update the `REQUIRED` dict in
+   `scripts/verify_outputs.py` in the same session and record the reason in
+   the debug log. Never delete a requirement just to make verification pass.
+
+6. **Do not declare overall completion yourself.** The outer loop re-runs the
+   verifier and stops when it passes. Your job each session is to move the
+   first failing notebook to passing, then continue to the next if you have
+   capacity.
+
+## `.scratch/progress.json` format
+
+```json
+{
+  "06": {
+    "status": "fail",
+    "last_error": "KeyError: 'spin_rate' in cell 14",
+    "attempts": 2,
+    "notes": "imputer fixed; tuning cells not yet run on full data",
+    "updated": "2026-06-11T21:00:00Z"
+  }
+}
+```
+
+Keep entries short. `status` is one of: `pending`, `in_progress`, `fail`,
+`pass`. Update it whenever a notebook's state changes.
 
 ---
 
@@ -29,6 +103,21 @@ Produce a stable, reproducible, restart-safe pipeline that:
 The goal is not just to make notebooks run.
 
 The goal is to create the strongest possible first version of the modeling pipeline.
+
+---
+
+# Python Environment (important — three interpreters exist)
+
+- **Notebook cells execute under the `pitcher311` Jupyter kernel** →
+  `/opt/homebrew/opt/python@3.11/bin/python3.11`. This has the full stack
+  (pandas, sklearn, xgboost, lifelines, scikit-survival, plotly). If a
+  notebook needs a new package (e.g. `shap` for notebook 10), install it
+  there: `/opt/homebrew/opt/python@3.11/bin/python3.11 -m pip install shap`
+- **`.venv/bin/python` (3.13)** only has nbconvert/nbformat — it drives
+  `run_notebooks.py` and `scripts/verify_outputs.py` but cannot import pandas.
+  Never install data-science packages here.
+- The default `python3` kernel points at a third interpreter. Do not use it;
+  `run_notebooks.py` already selects `pitcher311`.
 
 ---
 
@@ -60,17 +149,21 @@ The project must be capable of running on a laptop.
 
 For each notebook:
 
-1. Run notebook top-to-bottom.
-2. Fix all errors.
-3. Restart kernel.
-4. Run again from scratch.
-5. Confirm completion.
-6. Confirm outputs exist.
-7. Confirm restart safety.
+1. Run notebook top-to-bottom: `python run_notebooks.py --only NN --fail-fast`
+   (each run uses a fresh kernel, so restart safety is checked by construction).
+2. Fix all errors. Prefer fixing logic in `src/` modules and keeping notebooks
+   as thin orchestration over the modules — that is the established pattern.
+3. Run again from scratch with the same command.
+4. Confirm completion and outputs: `python scripts/verify_outputs.py --only NN`
+5. Log, update progress.json, commit (see Session Protocol).
 
 Do not patch isolated cells without verifying full notebook execution.
 
 The final notebooks must be restart-safe.
+
+Note: `run_notebooks.py` executes via nbconvert and saves partially executed
+notebooks on failure — the traceback is inside the .ipynb and in
+`.scratch/nb_execution_summary.json`. Read those instead of guessing.
 
 ---
 
@@ -650,15 +743,164 @@ Columns:
 
 ---
 
+# Notebook 10: Model Interpretability
+
+## Goal
+
+Understand what drives the model's predictions. Follow the plan already in
+the notebook's first markdown cell and `docs/project_roadmap.md` Phase 7.
+
+## Inputs
+
+Best available classifier from notebook 6 (prefer the tuned XGBoost) and the
+multitask model from notebook 8, plus the feature matrix.
+
+## Outputs
+
+```text
+reports/figures/shap_global_importance.png
+reports/figures/shap_beeswarm.png
+reports/figures/partial_dependence_*.png
+```
+
+## Required Analyses
+
+- SHAP global importance and beeswarm
+- Partial dependence for the highest-impact workload, velocity, and
+  injury-history features
+- Local explanations / case studies: one high-risk and one low-risk pitcher
+- Sanity commentary: do importances align with domain knowledge?
+
+Use a row sample for SHAP if the full matrix is too slow or memory-heavy —
+document the sample size.
+
+---
+
+# Notebook 11: Baseball-Specific Insights
+
+Already written but never executed. Run it, fix what breaks, and verify its
+input filenames against what actually exists on disk (e.g. it references
+`data/processed/pitcher_archetypes.parquet` — confirm whether the real file
+is `pitcher_clusters.parquet` and reconcile, fixing either the producer or
+the consumer, not by duplicating data).
+
+---
+
+# Notebook 12: Usage Strategy Simulation
+
+## Goal
+
+Simulate alternative usage strategies using the trained models. Follow the
+plan in the notebook's first markdown cell and roadmap Phase 9.
+
+## Inputs
+
+Trained models from notebooks 6–8 and `injury_risk_plus_scores.parquet`.
+
+## Outputs
+
+```text
+reports/tables/simulation_results.csv
+reports/figures/pitch_count_optimization.png
+reports/figures/rest_schedule_optimization.png
+```
+
+## Required Simulations
+
+Use the existing `src/simulation/` modules (`workload_simulator`,
+`pitch_mix_simulator`, `usage_strategy_simulator`). Implement or repair them
+as needed:
+
+- pitch count reduction → change in predicted risk
+- rest schedule variations
+- pitch mix changes (e.g. slider reduction)
+- role transition (starter → hybrid/reliever)
+
+These are model-based counterfactuals, not causal estimates. Say so in the
+notebook.
+
+---
+
+# Notebook 13: Dashboard
+
+## Goal
+
+Prototype the interactive dashboard (plotly) per the plan in the notebook's
+first markdown cell. This is a prototyping notebook — the contract is that it
+executes cleanly end-to-end, not that it produces files.
+
+## Required Components
+
+- pitcher lookup: Injury Risk+ with archetype-relative context
+- season leaderboard with filters
+- Injury Risk+ trend over time for a selected pitcher
+- component breakdown view (probability / days missed / severity / survival)
+
+Keep it laptop-safe: load only the scores parquet and slices of the feature
+matrix, not the full pitch-level data.
+
+---
+
+# Notebook Style Guide
+
+Match the conventions already established in notebooks 01–09 and the
+`scripts/generate_notebook_*.py` generators:
+
+1. **Cell structure.** First cell is markdown: `# NN — Title`, then
+   `## Purpose` with a short prose paragraph and a numbered list of what the
+   notebook does, then `## Target`/`## Inputs` where relevant. Every major
+   step gets a numbered markdown header (`## 1. Load Feature Matrix`) with
+   1–3 sentences of *why*, not just *what*.
+
+2. **Markdown carries the reasoning, code stays clean.** Explanations,
+   caveats, and methodology notes live in markdown cells (including small
+   tables like the "Model | Why it's here" table in notebook 06). Inline `#`
+   comments in code are sparse and only for non-obvious constraints.
+
+3. **Logic lives in `src/`, notebooks orchestrate.** Import functions from
+   `src/models/`, `src/scoring/`, `src/simulation/` and call them. If a
+   notebook needs new logic, add it to the appropriate `src/` module.
+
+4. **Every code cell prints evidence.** Shapes, rates, season lists, file
+   paths written — formatted like `print(f'Train: {X.shape[0]:,} rows | positive rate = {y.mean():.1%}')`.
+   A cell that runs silently is unverifiable.
+
+5. **Fail loudly on missing inputs:**
+
+   ```python
+   if not fm_path.exists():
+       raise FileNotFoundError('Run notebook 05 first to build the feature matrix.')
+   ```
+
+6. **New notebooks are built via generator scripts.** For notebooks 10, 12,
+   and 13, write `scripts/generate_notebook_NN.py` following the existing
+   `md()`/`code()` pattern, run it to produce the .ipynb, then execute. This
+   keeps the notebook source reviewable and regenerable.
+
+---
+
 # Documentation Requirements
 
 Create or update:
 
 ```text
-docs/notebook_5_to_9_debug_log.md
+docs/notebook_debug_log.md
 docs/data_dictionary.md
 docs/project_roadmap.md
 README.md
+```
+
+## Debug Log Entry Format
+
+Append one entry per fix, newest at the bottom, in exactly this shape so the
+log stays parseable across sessions:
+
+```markdown
+## [2026-06-11 21:04] NB06 cell 14 — KeyError: 'spin_rate'
+- **Cause:** column renamed to `release_spin_rate` in NB05 refactor
+- **Fix:** updated feature list in cell 3; same fix applied in src/models/baseline_models.py
+- **Assumptions/limitations:** none
+- **Verified:** `run_notebooks.py --only 06` passed; `verify_outputs.py --only 06` passed
 ```
 
 Debug log must include:
@@ -693,18 +935,28 @@ Implement a reasonable fallback.
 
 # Final Completion Criteria
 
-Task is complete only if:
+The single source of truth is:
+
+```bash
+python scripts/verify_outputs.py
+```
+
+Task is complete only if it exits 0, which requires:
 
 1. Notebook 5 runs safely on the full dataset.
 2. Notebook 6 trains and evaluates baseline models.
 3. Notebook 7 trains survival models or documents fallback.
 4. Notebook 8 produces multitask outputs.
 5. Notebook 9 creates Injury Risk+.
-6. Hyperparameter tuning completes.
-7. Calibration analysis completes.
-8. All required files exist.
-9. Pipeline can be restarted from scratch.
-10. Debug log documents all work.
+6. Notebook 10 produces SHAP and partial dependence analyses.
+7. Notebook 11 executes end-to-end.
+8. Notebook 12 produces simulation results.
+9. Notebook 13 executes end-to-end.
+10. Hyperparameter tuning completes.
+11. Calibration analysis completes.
+12. All required files exist.
+13. Pipeline can be restarted from scratch.
+14. Debug log documents all work and each passing notebook is committed.
 
 Prioritize:
 
