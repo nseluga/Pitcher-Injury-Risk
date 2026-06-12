@@ -21,6 +21,30 @@ and the Notebook Style Guide below. Notebook 11 is written but unexecuted.
 
 ---
 
+## Credit-Safe Execution Rule
+
+Do not spend Claude turns waiting for long notebook execution.
+
+Before launching any notebook, check whether another notebook process is already running:
+
+````bash
+ps aux | grep -E "run_notebooks|jupyter|nbconvert" | grep -v grep
+
+If a notebook is already running, update .scratch/progress.json and stop.
+
+If you need to run a full notebook, launch:
+
+python run_notebooks.py --only NN --fail-fast
+
+Then stop immediately unless the command finishes quickly.
+
+Do not repeatedly poll.
+Do not say you are waiting.
+Do not start another Claude session just to monitor execution.
+The user's laptop should do long execution; Claude should only diagnose, edit, launch, verify finished runs, and commit.
+
+--
+
 # Session Protocol (read this first, every session)
 
 You are one iteration of an outer loop (`run_project.sh`). Previous sessions
@@ -31,11 +55,11 @@ you leave behind. Therefore:
 
    ```bash
    python scripts/verify_outputs.py
-   ```
+````
 
-   Then read `.scratch/progress.json`, `docs/notebook_debug_log.md`, and
-   `.scratch/nb_execution_summary.json` if they exist. Do not re-derive
-   project state from scratch — trust the verifier and the logs.
+Then read `.scratch/progress.json`, `docs/notebook_debug_log.md`, and
+`.scratch/nb_execution_summary.json` if they exist. Do not re-derive
+project state from scratch — trust the verifier and the logs.
 
 2. **Work on the FIRST failing notebook only.** Notebooks have a strict
    dependency order (05 → 06 → 07 → 08 → 09 → 10 → 11 → 12 → 13). Fixing a
@@ -850,7 +874,7 @@ Match the conventions already established in notebooks 01–09 and the
    `## Purpose` with a short prose paragraph and a numbered list of what the
    notebook does, then `## Target`/`## Inputs` where relevant. Every major
    step gets a numbered markdown header (`## 1. Load Feature Matrix`) with
-   1–3 sentences of *why*, not just *what*.
+   1–3 sentences of _why_, not just _what_.
 
 2. **Markdown carries the reasoning, code stays clean.** Explanations,
    caveats, and methodology notes live in markdown cells (including small
@@ -897,6 +921,7 @@ log stays parseable across sessions:
 
 ```markdown
 ## [2026-06-11 21:04] NB06 cell 14 — KeyError: 'spin_rate'
+
 - **Cause:** column renamed to `release_spin_rate` in NB05 refactor
 - **Fix:** updated feature list in cell 3; same fix applied in src/models/baseline_models.py
 - **Assumptions/limitations:** none
