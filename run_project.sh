@@ -52,6 +52,7 @@ for i in $(seq 1 "$MAX_ITERS"); do
         --allowedTools "Read,Write,Edit,NotebookEdit,Glob,Grep,TodoWrite,Bash(ls *),Bash(find *),Bash(mkdir *),Bash(python *),Bash(python3 *),Bash(.venv/bin/python *),Bash(/opt/homebrew/opt/python@3.11/bin/python3.11 *),Bash(pytest *),Bash(python -m pytest *),Bash(jupyter *),Bash(git status*),Bash(git diff*),Bash(git log*),Bash(git add *),Bash(git commit *)" \
         --permission-mode acceptEdits \
         --max-turns 250 \
+        --verbose \
         2>&1 | tee "logs/run_$(date +%Y%m%d)_iter${i}.log"
 
     echo "Claude session $i finished."
