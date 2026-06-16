@@ -73,6 +73,17 @@ project state from scratch — trust the verifier and the logs.
    python run_notebooks.py --only NN --fail-fast
    ```
 
+   **Mandatory test-mode gate before any full run:**
+   After every code/notebook edit, run the notebook in TEST_MODE first:
+   ```python
+   # Temporarily set at the top of the notebook
+   TEST_MODE = True
+   ```
+   Check that the cell outputs look correct and there are no errors.
+   Only then switch to `TEST_MODE = False` and launch the full run.
+   Never launch a full run on an unverified fix — a broken 10-minute run wastes
+   more quota than a passing 30-second test run.
+
 4. **Verify, then commit.** A notebook is done when
    `python scripts/verify_outputs.py --only NN` passes. Then immediately:
    - append a debug-log entry (format in Documentation Requirements below)
