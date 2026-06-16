@@ -1,17 +1,14 @@
 #!/bin/bash
-# Autonomous notebook-completion loop.
-#
-# Goal:
-# - Use Claude for diagnosis + code edits.
-# - Use your laptop for long notebook execution.
-# - Prevent Claude from wasting quota by waiting/polling.
+# Autonomous notebook-completion loop — long-running / credit-unlimited variant.
+# Same as run_project.sh but never exits early; waits for notebook runs to finish
+# and keeps calling Claude until all notebooks pass or MAX_ITERS is exhausted.
 #
 # Usage:
-#   ./run_project.sh [max_iterations]   default 8
+#   ./run_model_long.sh [max_iterations]   default 50
 
 set -u
 
-MAX_ITERS="${1:-8}"
+MAX_ITERS="${1:-50}"
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_ROOT"
 mkdir -p logs .scratch
@@ -19,14 +16,11 @@ mkdir -p logs .scratch
 PYTHON="python3"
 [ -x "$PROJECT_ROOT/.venv/bin/python" ] && PYTHON="$PROJECT_ROOT/.venv/bin/python"
 
-# Give Claude enough time for real commands, but the prompt tells it not to
-# babysit long notebook runs.
-export BASH_DEFAULT_TIMEOUT_MS=600000      # 10 min default
-export BASH_MAX_TIMEOUT_MS=14400000       # 4 hr ceiling
+export BASH_DEFAULT_TIMEOUT_MS=600000
+export BASH_MAX_TIMEOUT_MS=14400000
 
 PROMPT='Read claude_instructions.md and follow the Session Protocol.
 
-IMPORTANT: do NOT wait around for long-running notebook execution.
 Your job this session is one of these:
 
 1. If a notebook is actively running, record that in .scratch/progress.json and STOP.
@@ -49,16 +43,19 @@ for i in $(seq 1 "$MAX_ITERS"); do
     echo "# Iteration $i of $MAX_ITERS — $(date)"
     echo "############################################################"
 
-    # If a notebook is already running, do not start Claude.
+    # If a notebook is running, wait for it to finish before calling Claude.
     if ps aux | grep -E "run_notebooks|jupyter|nbconvert" | grep -v grep >/dev/null; then
-        echo "Notebook execution is already running. Not starting Claude."
-        ps aux | grep -E "run_notebooks|jupyter|nbconvert" | grep -v grep
-        exit 0
+        echo "Notebook execution is running. Waiting for it to finish..."
+        while ps aux | grep -E "run_notebooks|jupyter|nbconvert" | grep -v grep >/dev/null; do
+            sleep 30
+        done
+        echo "Notebook finished at $(date). Continuing loop."
     fi
 
     if "$PYTHON" scripts/verify_outputs.py; then
         echo ""
         echo "✓ All notebooks complete and verified after $((i-1)) iteration(s)."
+        afplay /System/Library/Sounds/Funk.aiff
         exit 0
     fi
 
@@ -74,21 +71,16 @@ for i in $(seq 1 "$MAX_ITERS"); do
 
     echo "Claude session $i finished."
 
-    # If Claude launched a notebook, stop the outer loop so the laptop can run alone.
-    if ps aux | grep -E "run_notebooks|jupyter|nbconvert" | grep -v grep >/dev/null; then
-        echo "Notebook execution launched. Exiting so it can run without burning Claude quota."
-        ps aux | grep -E "run_notebooks|jupyter|nbconvert" | grep -v grep
-        exit 0
-    fi
-
     sleep 30
 done
 
 echo ""
 if "$PYTHON" scripts/verify_outputs.py; then
     echo "✓ All notebooks complete and verified."
+    afplay /System/Library/Sounds/Funk.aiff
     exit 0
 fi
 
 echo "✗ Did not converge after $MAX_ITERS iterations. See logs/ and .scratch/verification.json."
+afplay /System/Library/Sounds/Funk.aiff
 exit 1
