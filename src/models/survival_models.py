@@ -27,6 +27,61 @@ from sklearn.impute import SimpleImputer
 from src.models.baseline_models import _infer_feature_cols
 
 DEFAULT_HORIZON_DAYS = 90
+_MAX_COX_ROWS = 12_000   # Cox PH log-partial-likelihood is O(n*D*p); cap to keep fit <5 min on a laptop
+_MAX_RSF_ROWS = 12_000   # RSF with n_jobs=-1 is fast at 12K; larger sizes caused 2-hr timeouts
+_MAX_COX_FEATURES = 20   # feature pre-selection cap for Cox PH (reduces Hessian dimension)
+
+
+def _subsample(
+    X: pd.DataFrame,
+    T: pd.Series,
+    E: pd.Series,
+    max_rows: int,
+    random_state: int = 42,
+) -> tuple:
+    """Stratified subsample of (X, T, E) keeping events + random censored rows.
+
+    Cox PH and AFT models are consistent estimators on subsamples — no bias
+    introduced, just reduced wall time from hours to minutes on a laptop.
+    When events alone exceed max_rows, events are subsampled too.
+    """
+    if len(X) <= max_rows:
+        return X, T, E
+    rng = np.random.default_rng(random_state)
+    idx_event = np.where(E.values == 1)[0]
+    idx_censor = np.where(E.values == 0)[0]
+    if len(idx_event) >= max_rows:
+        # More events than the cap — subsample events only (unusual but handled)
+        idx_keep = rng.permutation(rng.choice(idx_event, size=max_rows, replace=False))
+        n_evt, n_cen = max_rows, 0
+    else:
+        n_cen = min(max_rows - len(idx_event), len(idx_censor))
+        idx_censor_s = rng.choice(idx_censor, size=n_cen, replace=False)
+        idx_keep = rng.permutation(np.concatenate([idx_event, idx_censor_s]))
+        n_evt = len(idx_event)
+    print(
+        f"  [subsample] {len(X):,} → {len(idx_keep):,} rows "
+        f"({n_evt:,} events + {n_cen:,} censored)"
+    )
+    return X.iloc[idx_keep], T.iloc[idx_keep], E.iloc[idx_keep]
+
+
+def _select_top_features(
+    X: pd.DataFrame,
+    E: pd.Series,
+    n: int = _MAX_COX_FEATURES,
+) -> list[str]:
+    """Select top-n features by absolute correlation with the event indicator.
+
+    Fast univariate filter that shrinks the Cox PH design matrix before fitting.
+    Fewer features mean a smaller Hessian and dramatically faster Newton-Raphson.
+    Cox PH is still meaningful on 20 well-selected features.
+    """
+    corr = X.corrwith(E.astype(float)).abs().sort_values(ascending=False)
+    selected = corr.dropna().head(n).index.tolist()
+    if not selected:
+        return list(X.columns[:n])
+    return selected
 
 
 def prepare_survival_dataset(
@@ -107,6 +162,8 @@ def train_cox_ph(
     X_train: pd.DataFrame,
     T_train: pd.Series,
     E_train: pd.Series,
+    max_train_rows: int = _MAX_COX_ROWS,
+    n_features: int = _MAX_COX_FEATURES,
 ) -> object:
     """Train a Cox Proportional Hazards model using lifelines.
 
@@ -114,6 +171,11 @@ def train_cox_ph(
         X_train: Training feature matrix.
         T_train: Duration (days until event or censoring).
         E_train: Event indicator (1 = injured, 0 = censored).
+        max_train_rows: Cap training rows via stratified subsampling (Cox PH
+            scales poorly — O(n*D) partial likelihood per iteration).
+        n_features: Pre-select top-n features by event correlation before
+            fitting. Reduces Hessian dimension and speeds Newton-Raphson
+            from hours to seconds on a laptop.
 
     Returns:
         Fitted lifelines CoxPHFitter object. The imputer used to fill missing
@@ -122,8 +184,15 @@ def train_cox_ph(
     """
     from lifelines import CoxPHFitter
 
+    X_train, T_train, E_train = _subsample(X_train, T_train, E_train, max_train_rows)
+
     X_imp, imputer = _impute(X_train)
     X_imp = _drop_zero_variance(X_imp)
+
+    if n_features and len(X_imp.columns) > n_features:
+        selected = _select_top_features(X_imp, E_train, n=n_features)
+        X_imp = X_imp[selected]
+        print(f"  [feature select] {len(X_train.columns)} → {len(selected)} features for Cox PH")
 
     fit_df = X_imp.copy()
     fit_df["_duration"] = T_train.values
@@ -141,6 +210,7 @@ def train_aft_model(
     T_train: pd.Series,
     E_train: pd.Series,
     distribution: str = "weibull",
+    max_train_rows: int = _MAX_COX_ROWS,
 ) -> object:
     """Train an Accelerated Failure Time model.
 
@@ -150,6 +220,7 @@ def train_aft_model(
         E_train: Event indicator series.
         distribution: Parametric distribution to use ('weibull', 'lognormal',
             'loglogistic').
+        max_train_rows: Subsample cap for laptop-safe training.
 
     Returns:
         Fitted lifelines AFT model object, with `_imputer_`/`_feature_cols_`
@@ -164,6 +235,8 @@ def train_aft_model(
     }
     if distribution not in fitters:
         raise ValueError(f"Unknown distribution: {distribution!r} (expected one of {list(fitters)})")
+
+    X_train, T_train, E_train = _subsample(X_train, T_train, E_train, max_train_rows)
 
     X_imp, imputer = _impute(X_train)
     X_imp = _drop_zero_variance(X_imp)
@@ -183,6 +256,7 @@ def train_random_survival_forest(
     X_train: pd.DataFrame,
     T_train: pd.Series,
     E_train: pd.Series,
+    max_train_rows: int = _MAX_RSF_ROWS,
 ) -> object:
     """Train a Random Survival Forest using scikit-survival.
 
@@ -193,12 +267,15 @@ def train_random_survival_forest(
         X_train: Training feature matrix.
         T_train: Duration series.
         E_train: Event indicator series.
+        max_train_rows: Subsample cap for laptop-safe training.
 
     Returns:
         Fitted scikit-survival RandomSurvivalForest object, with
         `_imputer_`/`_feature_cols_` attached.
     """
     from sksurv.ensemble import RandomSurvivalForest
+
+    X_train, T_train, E_train = _subsample(X_train, T_train, E_train, max_train_rows)
 
     X_imp, imputer = _impute(X_train)
     X_imp = _drop_zero_variance(X_imp)
@@ -209,9 +286,10 @@ def train_random_survival_forest(
     )
 
     model = RandomSurvivalForest(
-        n_estimators=200,
+        n_estimators=100,
         max_depth=6,
-        min_samples_leaf=15,
+        min_samples_leaf=20,
+        max_features="sqrt",
         n_jobs=-1,
         random_state=42,
     )

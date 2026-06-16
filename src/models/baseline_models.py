@@ -99,7 +99,7 @@ def train_logistic_regression(
         Fitted sklearn Pipeline wrapping a LogisticRegression model.
     """
     pipeline = Pipeline([
-        ("imputer", SimpleImputer(strategy="median")),
+        ("imputer", SimpleImputer(strategy="median", keep_empty_features=True)),
         ("scaler", StandardScaler()),
         ("clf", LogisticRegression(
             penalty="l2",
@@ -127,7 +127,7 @@ def train_random_forest(
         Fitted sklearn RandomForestClassifier object (best estimator from CV).
     """
     base = Pipeline([
-        ("imputer", SimpleImputer(strategy="median")),
+        ("imputer", SimpleImputer(strategy="median", keep_empty_features=True)),
         ("clf", RandomForestClassifier(class_weight="balanced", random_state=42, n_jobs=-1)),
     ])
     param_grid = {
@@ -193,7 +193,7 @@ def train_gradient_boosting(
         raise ValueError(f"Unknown framework: {framework!r} (expected 'xgboost' or 'lightgbm')")
 
     pipeline = Pipeline([
-        ("imputer", SimpleImputer(strategy="median")),
+        ("imputer", SimpleImputer(strategy="median", keep_empty_features=True)),
         ("clf", clf),
     ])
     pipeline.fit(X_train, y_train)
