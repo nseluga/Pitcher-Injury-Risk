@@ -17,6 +17,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
+from scipy.stats import linregress
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
@@ -124,10 +125,22 @@ def evaluate_calibration(
     ece = float(np.average(gaps, weights=weights)) if len(gaps) else float("nan")
     mce = float(gaps.max()) if len(gaps) else float("nan")
 
+    # Calibration slope: OLS slope of observed labels on predicted probs.
+    # Ideal = 1.0; < 1 = overconfident (probabilities spread too wide);
+    # > 1 = underconfident. Recommended by JOSPT 2021 Clinical Prediction
+    # Models guide as the primary calibration-in-the-large metric alongside
+    # ECE and Brier score.
+    if len(np.unique(y_prob)) > 1:
+        slope, intercept, _, _, _ = linregress(y_prob, y_true)
+    else:
+        slope, intercept = float("nan"), float("nan")
+
     return {
         "expected_calibration_error": ece,
         "max_calibration_error": mce,
         "brier_score": float(brier_score_loss(y_true, y_prob)),
+        "calibration_slope": float(slope),
+        "calibration_intercept": float(intercept),
     }
 
 

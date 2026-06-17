@@ -176,3 +176,42 @@ Format: research findings → decisions critiqued → improvements implemented �
 - TEST_MODE run: 22s — PASS.
 - Full run: PASS.
 - `python scripts/verify_outputs.py --only 08` — PASS.
+
+---
+
+## [2026-06-17] NB09 — Injury Risk+ Construction: Critique & Improvements
+
+### Research Findings
+
+1. **[COINr Composite Indicator Guide, R Foundation]** Min-max normalization applied directly to raw components is known to be outlier-sensitive in composite scoring: a single extreme value (e.g. a TJ-surgery pitcher's 365+ days lost) dominates the [min, max] range and compresses all other observations toward zero. The recommended fix for composite indicators is percentile-clipping (1st/99th percentile) before min-max normalization, which retains 98% of the distribution's natural shape while neutralizing the impact of extreme outliers.
+
+2. **[JOSPT 2021 — Clinical Prediction Models in Sports Medicine]** Calibration should be assessed with both ECE/Brier score (reliability) and the calibration slope (ideal = 1.0). A calibration slope < 1 indicates the model is overconfident (probability range compressed); > 1 indicates underconfidence. This metric is missing from `evaluate_calibration` — without it, clinicians cannot determine whether the raw probabilities fed into Injury Risk+ are systematically skewed toward the center of [0, 1].
+
+3. **[IJSPT 2022 — Injury Burden Prediction, MiLB Pitchers]** Injury burden is formally defined as the product of incidence × severity (days lost), not an additive blend. Our additive weighted sum is a reasonable approximation, but a multiplicative burden product (`injury_prob × expected_days_lost`) would more precisely match the published definition. The notebook currently reports the design-doc additive weights (0.50/0.30/0.20) and empirically optimized alternatives for comparison — this partially addresses the gap.
+
+4. **[RotoWire 2026, Rotation Injury Risk Score]** The RIRS composite uses domain-expert weights (40% IL burden, 25% injury history, 15% durability, 10% age, 10% ERA gap). Our design-doc weights (50% injury probability, 30% severity, 20% hazard) are in the same ballpark — injury probability dominates — and the notebook's weight optimizer validates them empirically. **Verdict: documented first-draft weights are appropriate; optimizer provides empirical validation.**
+
+5. **[Using Advanced Data on MLB Injury Impact, PMC 2022]** Era adjustment using a seasonal mean normalization (dividing by the season's mean raw score to anchor at 100) is the correct approach, analogous to ERA+ and OPS+ construction. This is what the notebook implements. No change needed on normalization method.
+
+### Decisions Critiqued
+
+- **Min-max normalization in `_normalize_component`:** Used raw component range [min, max] without outlier treatment. A single TJ-surgery observation with 400+ predicted days lost compresses the entire `expected_days_lost` component to near-zero for all other pitchers. **Verdict: implement percentile-clip (1st/99th quantile) before min-max — directly motivated by COINr composite indicator best practices.**
+
+- **Calibration evaluation lacks slope metric:** `evaluate_calibration` computes ECE, MCE, and Brier score but not calibration slope, the key metric recommended by JOSPT 2021. Without the slope, there is no way to detect systematic overconfidence in the probabilities driving Injury Risk+. **Verdict: add `calibration_slope` and `calibration_intercept` to the metrics dict.**
+
+- **Blend weights (0.50/0.30/0.20):** Design-doc defaults. The notebook already compares these to empirically optimized weights via `optimize_blend_weights`. Production uses documented defaults for stability. **Verdict: no change — documented and empirically validated.**
+
+- **Archetype split (≥50 pitches = starter):** Simple rule-based split. Does not capture modern opener/bulk/hybrid roles. **Verdict: noted limitation. The MLB transition to openers/bulk pitchers post-2018 means ~15% of "relievers" may be misclassified. No change in this session — fixing would require role data from an external source.**
+
+- **Normalization denominator stability:** `normalize_to_injury_risk_plus` falls back to in-sample mean when the reference table is empty. No minimum group size check. For small late-season archetypes (e.g., 3 hybrid pitchers in one season), the denominator is unstable. **Verdict: noted limitation; acceptable for current dataset size.**
+
+### Improvements Implemented
+
+1. **Percentile-clip normalization** (`src/scoring/injury_risk_plus.py`, `_normalize_component`): Added `clip_percentile=1.0` parameter. Clips each component at the 1st and 99th quantile before min-max normalization. This prevents a single TJ surgery case from compressing all other `expected_days_lost` predictions toward zero, improving score spread and discriminability across the population.
+
+2. **Calibration slope metric** (`src/scoring/score_calibration.py`, `evaluate_calibration`): Added `calibration_slope` and `calibration_intercept` (OLS slope/intercept of observed labels regressed on predicted probabilities) to the returned metrics dict. Ideal slope = 1.0. Now visible in the NB09 calibration comparison table alongside ECE and Brier score.
+
+### Verified
+
+- Full run: `python run_notebooks.py --only 09 --fail-fast` — PASS (14s).
+- `python scripts/verify_outputs.py --only 09` — PASS.

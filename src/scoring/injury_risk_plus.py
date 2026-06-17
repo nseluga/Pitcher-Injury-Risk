@@ -40,9 +40,21 @@ def _archetype_for(master_df: pd.DataFrame) -> pd.Series:
     return pd.Series(np.where(season_avg >= 50, "starter", "reliever"), index=master_df.index)
 
 
-def _normalize_component(s: pd.Series) -> pd.Series:
-    """Min-max normalize a component to [0, 1]; constant series map to 0."""
+def _normalize_component(s: pd.Series, clip_percentile: float = 1.0) -> pd.Series:
+    """Percentile-clip then min-max normalize a component to [0, 1].
+
+    Clips at [clip_percentile, 100-clip_percentile] quantiles before
+    normalizing. Without clipping, a single TJ-surgery case (365+ days lost)
+    would dominate the expected_days_lost range and compress all other pitchers
+    toward zero. clip_percentile=1.0 retains 98% of the observed distribution.
+    Reference: COINr composite indicator guide; recommended for composite
+    scores with right-skewed components.
+    """
     s = s.astype(float)
+    lo_clip = float(s.quantile(clip_percentile / 100.0))
+    hi_clip = float(s.quantile(1.0 - clip_percentile / 100.0))
+    if np.isfinite(lo_clip) and np.isfinite(hi_clip) and hi_clip > lo_clip:
+        s = s.clip(lo_clip, hi_clip)
     lo, hi = s.min(), s.max()
     if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
         return pd.Series(np.zeros(len(s)), index=s.index)
