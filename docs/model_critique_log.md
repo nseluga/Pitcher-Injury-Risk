@@ -48,3 +48,89 @@ Format: research findings → decisions critiqued → improvements implemented �
 - Smoke test `.scratch/test_nb05_changes.py` passed: `intragame_velo_drop` returns non-NaN values, `fb_velo_14d_avg` present, `sl_spin_mean` / `sl_spin_delta_30d` present.
 - Full notebook run: `python run_notebooks.py --only 05 --fail-fast` — PASS.
 - `python scripts/verify_outputs.py --only 05` — PASS.
+
+---
+
+## [2026-06-16] NB06 — Baseline Models: Critique & Improvements
+
+### Research Findings
+
+1. **[PMC12013557 — Scoping review, 2024]** Of 15 ML sports-injury prediction studies reviewed, 10 (67%) used SMOTE to address class imbalance. ROC-AUC was the primary metric in 71% of studies, but the review notes that for severely imbalanced datasets (<10% positive rate), PR-AUC and F1 are more discriminative than ROC-AUC.
+
+2. **[PMC11369970 — MLB Pitcher ML, 2024]** Pitch-tracking metrics study on shoulder/elbow injuries used a stratified 5-fold CV and balanced sampling. Achieved ROC-AUC of 0.84. Used tree-based models (RF, XGBoost) as primary classifiers. Confirms tree-based approaches are the right choice for this domain.
+
+3. **[PMC10613321 — Overview of ML for sports injury prediction]** In 60% of studies, tree-based models (RF, XGBoost) provided highest predictive performance. Temporal splitting and walk-forward CV are the methodologically correct evaluation design for longitudinal athlete data. Both are implemented in NB06. ✓
+
+4. **[arXiv 2207.00585 — UCL injury prediction, MLB rookies]** Applied oversampling (SMOTE, random, and class-weight approaches) for UCL injury prediction in MLB. Found `class_weight='balanced'` and `scale_pos_weight` competitive with SMOTE when combined with careful temporal splitting. This affirms our current class-balancing approach as valid.
+
+5. **[BMC Sports Science 2025, PMC12964768]** For imbalanced injury prediction, recommends using PR-AUC (average precision) as the primary optimization metric because ROC-AUC can appear inflated — in a dataset with 95% negatives, even a poor model achieves high ROC-AUC by correctly predicting non-injury.
+
+### Decisions Critiqued
+
+- **Primary evaluation metric (auc_roc):** NB06 sorts model comparison by `auc_roc`. For ~5% positive rate injury data, PR-AUC is more discriminative — ROC-AUC includes true negative performance which dominates. Literature consensus (BMC 2025, scoping review) supports PR-AUC for severe class imbalance. **Verdict: changed sort key from `auc_roc` to `pr_auc` in model comparison table; affects best-model selection for downstream CV and multi-horizon comparison.**
+
+- **RF GridSearchCV scoring (`roc_auc`):** Internal hyperparameter search used `scoring="roc_auc"`. This selects RF hyperparameters optimized for ROC performance, not PR-AUC. **Verdict: changed to `scoring="average_precision"` in `baseline_models.py` — selects RF parameters that better identify injured pitchers.**
+
+- **Class balancing (`class_weight='balanced'` + `scale_pos_weight`):** Both are valid alternatives to SMOTE (arXiv 2207.00585 confirms). SMOTE on temporal pitcher data risks creating synthetic rows that span season boundaries or pitcher-identity boundaries. **Verdict: no change — current approach is appropriate; SMOTE flagged as future enhancement with caution.**
+
+- **Hyperparameter search (RandomizedSearchCV, N_ITER=20):** FAST_TUNING mode with 20 iterations. Literature-appropriate for a laptop-constrained training loop. Walk-forward CV with 5 folds is the gold standard for temporal sports data. **Verdict: no change — current approach matches literature.**
+
+- **Temporal splitting:** Last 2 seasons held out for test. Walk-forward CV implemented. This is the methodologically correct design per temporal sports injury literature. **Verdict: no change — current approach matches literature.**
+
+### Improvements Implemented
+
+1. **RF GridSearchCV scoring** (`src/models/baseline_models.py`): Changed `scoring="roc_auc"` → `scoring="average_precision"` so RF hyperparameter selection is optimized for the metric that matters for imbalanced injury data.
+
+2. **Primary model comparison sort** (`notebooks/06_baseline_models.ipynb`, cell 12): Changed `sort_values('auc_roc')` → `sort_values('pr_auc')`. Affects `best_model_name` selection for walk-forward CV and multi-horizon comparison — the "best" model will now be the one with highest PR-AUC, which is more clinically meaningful.
+
+### Verified
+
+- `verify_outputs.py --only 06` — PASS (2026-06-17). Both improvements confirmed in output: sort_values by pr_auc in notebook, scoring="average_precision" in RF GridSearchCV.
+
+---
+
+## [2026-06-17] NB07 — Survival Models: Critique & Improvements
+
+### Research Findings
+
+1. **[PMC8775284 — Hazard of Arm Injury, MiLB]** Cox PH survival analysis used to compare starters vs. relievers — found starters had 2.4× higher hazard of arm injury. Confirms Cox PH is used in pitcher injury research, but does not report whether the PH assumption was tested. This is a methodological gap in the literature that we address.
+
+2. **[Wei 1992, Statistics in Medicine — AFT models]** The Accelerated Failure Time model is a well-validated alternative to Cox PH when the proportional hazards assumption is violated. AFT directly models the time-to-event as a function of covariates (multiplicative time-scaling) rather than modeling the instantaneous hazard. Advantage: no PH assumption required.
+
+3. **[Springer 2025, TJS prediction paper]** A classification model detects TJ surgery risk 100 days in advance (F1=0.73); a regression model estimates time remaining until last pre-surgery game (R²=0.79). Confirms that time-to-event framing is meaningful for pitcher UCL injury, and that both classification and survival-style regression are valid approaches.
+
+4. **[scikit-survival docs — Evaluating Survival Models]** The standard dual-metric evaluation for survival models is C-index (discrimination) + Integrated Brier Score (calibration). C-index alone is insufficient because a model can rank pitchers correctly (high C-index) while producing poorly calibrated survival probabilities. IBS matters because Injury Risk+ uses the survival probabilities, not just rankings.
+
+5. **[Comparison of PH and AFT models, CORE paper]** When the PH assumption is violated, Cox PH produces biased hazard estimates and inflated apparent C-index. The AFT Weibull is preferred because pitcher injury hazard rates are plausibly non-proportional (early-season fresh-arm risk vs. late-season accumulated-fatigue risk differ in ways that may violate the constant-HR assumption).
+
+### Decisions Critiqued
+
+- **Cox PH only, no AFT trained:** The notebook's purpose section mentions "Weibull AFT" as one of the three implemented models, and `train_aft_model` is imported in cell 1. However, the training cell only calls `train_cox_ph` and `train_random_survival_forest` — the AFT model is imported but never used. **Verdict: bug/gap — implemented Weibull AFT training in cell 5.**
+
+- **PH assumption never tested:** Cox PH requires hazard ratios to be constant over time. For pitchers, early-season vs. late-season risk may violate this. The notebook fitted Cox PH without any Schoenfeld residual test or check_assumptions() call. **Verdict: added `check_ph_assumption()` call after training, using lifelines' built-in test.**
+
+- **Feature selection for AFT model (all features):** `train_aft_model` previously fit on all available features (after imputation and zero-variance dropping), which could be very slow or numerically unstable with 100+ features. Cox PH had a pre-selection cap (`n_features=20`) but AFT did not. **Verdict: added identical `n_features` parameter and `_select_top_features` pre-filter to `train_aft_model` for consistency and stability.**
+
+- **Feature selection method (univariate correlation):** `_select_top_features` selects top-N features by absolute correlation with the event indicator. This misses non-linear relationships (e.g. ACWR has a U-shaped relationship with injury risk, which has near-zero linear correlation). Better methods: mutual information or LASSO. **Verdict: noted as limitation; current approach is acceptable for a laptop-constrained pipeline and avoids introducing another library dependency. Future enhancement: mutual information filter.**
+
+- **RSF hyperparameters (max_depth=6, n_estimators=100):** These are reasonable defaults and tuning is present in the notebook. **Verdict: no change — current approach matches literature.**
+
+- **Model evaluation sort by C-index:** The notebook correctly uses C-index as the primary ranking metric. IBS is computed but not used in model selection. Since Injury Risk+ uses survival probabilities (calibration matters), best_model_name could also consider IBS. **Verdict: acceptable for now — C-index is the standard primary metric; IBS is reported and provides calibration context.**
+
+### Improvements Implemented
+
+1. **Weibull AFT training** (`notebooks/07_survival_models.ipynb`, cell 5): Added `survival_models['aft_weibull'] = train_aft_model(...)` call. The AFT model is now trained alongside Cox PH and RSF, evaluated in the same metrics loop, and its C-index and IBS appear in the comparison table.
+
+2. **PH assumption test** (`notebooks/07_survival_models.ipynb`, cells 6–7 new): Added a markdown section and code cell that calls `check_ph_assumption(survival_models['cox_ph'])`, running Schoenfeld residual tests for all Cox features. Features that violate proportionality are flagged in output.
+
+3. **Feature pre-selection for AFT** (`src/models/survival_models.py`, `train_aft_model`): Added `n_features: int = _MAX_COX_FEATURES` parameter and the same `_select_top_features` pre-filter used by Cox PH. Prevents fitting failures on high-dimensional inputs.
+
+4. **`_fit_df_` stash on Cox model** (`src/models/survival_models.py`, `train_cox_ph`): Added `model._fit_df_ = fit_df.copy()` after fitting so `check_ph_assumption()` can run the Schoenfeld test without re-running preprocessing. Memory cost is bounded: at most 12,000 rows × 20 features.
+
+5. **`check_ph_assumption()` helper** (`src/models/survival_models.py`): New function wrapping `lifelines CoxPHFitter.check_assumptions()` with graceful error handling and clear output labels.
+
+### Verified
+
+- TEST_MODE run: `python run_notebooks.py --only 07 --fail-fast` — PASS (113s).
+- Full run: `python run_notebooks.py --only 07 --fail-fast` — PASS (113s).
+- `python scripts/verify_outputs.py --only 07` — PASS.

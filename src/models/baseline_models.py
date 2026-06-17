@@ -135,8 +135,11 @@ def train_random_forest(
         "clf__max_depth": [4, 8, None],
         "clf__min_samples_leaf": [1, 5],
     }
+    # average_precision (PR-AUC) is the correct scoring metric for severely
+    # imbalanced injury data (~5% positive rate). roc_auc can be misleadingly
+    # high because it accounts for true negatives, which dominate in this regime.
     search = GridSearchCV(
-        base, param_grid, scoring="roc_auc", cv=3, n_jobs=-1, refit=True,
+        base, param_grid, scoring="average_precision", cv=3, n_jobs=-1, refit=True,
     )
     search.fit(X_train, y_train)
     return search.best_estimator_

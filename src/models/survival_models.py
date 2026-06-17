@@ -202,7 +202,33 @@ def train_cox_ph(
     model.fit(fit_df, duration_col="_duration", event_col="_event")
     model._imputer_ = imputer
     model._feature_cols_ = list(X_imp.columns)
+    # Stash a copy of the fit DataFrame so check_ph_assumption() can run
+    # Schoenfeld residual tests without re-running preprocessing.
+    model._fit_df_ = fit_df.copy()
     return model
+
+
+def check_ph_assumption(cox_model: object, p_value_threshold: float = 0.05) -> None:
+    """Test the proportional hazards assumption using Schoenfeld residuals.
+
+    Prints a summary of features whose hazard ratio appears to vary over time
+    (i.e. where the PH assumption is violated). A flat Schoenfeld residual plot
+    confirms the assumption holds. A trend indicates a time-varying hazard — if
+    many features violate PH, a Weibull AFT model (which lacks this assumption)
+    should be preferred.
+
+    Args:
+        cox_model: A CoxPHFitter fitted by train_cox_ph (must have _fit_df_).
+        p_value_threshold: Features with p < threshold are flagged as violations.
+    """
+    if not hasattr(cox_model, "_fit_df_"):
+        print("PH assumption check skipped — _fit_df_ not found. Re-fit with train_cox_ph.")
+        return
+    try:
+        print(f"Proportional Hazards Assumption Test (Schoenfeld residuals, α={p_value_threshold}):")
+        cox_model.check_assumptions(cox_model._fit_df_, p_value_threshold=p_value_threshold, show_plots=False)
+    except Exception as exc:
+        print(f"PH assumption test failed: {exc}")
 
 
 def train_aft_model(
@@ -211,8 +237,14 @@ def train_aft_model(
     E_train: pd.Series,
     distribution: str = "weibull",
     max_train_rows: int = _MAX_COX_ROWS,
+    n_features: int = _MAX_COX_FEATURES,
 ) -> object:
     """Train an Accelerated Failure Time model.
+
+    Does not require the proportional hazards assumption — a key advantage over
+    Cox PH when injury hazard rates change over time (e.g. early-season vs.
+    late-season risk profiles differ). Uses the same feature pre-selection and
+    subsampling caps as train_cox_ph for laptop safety.
 
     Args:
         X_train: Training feature matrix.
@@ -221,6 +253,8 @@ def train_aft_model(
         distribution: Parametric distribution to use ('weibull', 'lognormal',
             'loglogistic').
         max_train_rows: Subsample cap for laptop-safe training.
+        n_features: Pre-select top-n features by event correlation (same filter
+            as Cox PH). Reduces fitting time on high-dimensional inputs.
 
     Returns:
         Fitted lifelines AFT model object, with `_imputer_`/`_feature_cols_`
@@ -240,6 +274,12 @@ def train_aft_model(
 
     X_imp, imputer = _impute(X_train)
     X_imp = _drop_zero_variance(X_imp)
+
+    orig_n = len(X_imp.columns)
+    if n_features and orig_n > n_features:
+        selected = _select_top_features(X_imp, E_train, n=n_features)
+        X_imp = X_imp[selected]
+        print(f"  [feature select] {orig_n} → {len(selected)} features for AFT ({distribution})")
 
     fit_df = X_imp.copy()
     fit_df["_duration"] = T_train.values
