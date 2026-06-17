@@ -38,13 +38,19 @@ def simulate_pitch_count_reduction(
 ) -> dict[str, float]:
     """Estimate the change in injury risk from reducing pitch count per game.
 
-    Modifies pitch_count and proportionally scales rolling pitch totals
-    (pitches_7d, pitches_28d, pitches_90d) to represent consistent lower usage,
-    then reruns model inference.
+    Uses additive perturbation: the delta between new_count and orig_count is
+    applied to all rolling pitch total features (pitches_7d, pitches_28d,
+    pitches_90d, pitches_season_to_date), then acwr_7_28 is recomputed from the
+    updated rolling totals. This gives an internally consistent feature vector.
+
+    Proportional scaling (the prior approach) preserved ACWR because both the
+    numerator and denominator scaled by the same factor — incorrect for a
+    single-game counterfactual where ACWR should change with acute load.
 
     Args:
         pitcher_profile: A single row of the feature matrix (pd.Series).
-        reduction_pitches: Number of pitches to remove from the game.
+        reduction_pitches: Pitches to remove (positive = reduction,
+            negative = increase above original count).
         model_dict: Must contain 'xgb_pipeline' and 'feature_cols'.
 
     Returns:
@@ -55,12 +61,18 @@ def simulate_pitch_count_reduction(
 
     orig_count = float(mod.get("pitch_count", 95.0) or 95.0)
     new_count = max(30.0, orig_count - reduction_pitches)
-    scale = new_count / orig_count if orig_count > 0 else 1.0
+    delta = new_count - orig_count  # actual change (may differ at floor)
 
     mod["pitch_count"] = new_count
     for col in ("pitches_7d", "pitches_28d", "pitches_90d", "pitches_season_to_date"):
         if col in mod.index and pd.notna(mod[col]):
-            mod[col] = float(mod[col]) * scale
+            mod[col] = max(0.0, float(mod[col]) + delta)
+
+    # Recompute ACWR from updated rolling totals for internal consistency.
+    p7d  = float(mod.get("pitches_7d",  0) or 0)
+    p28d = float(mod.get("pitches_28d", 0) or 0)
+    if "acwr_7_28" in mod.index and p28d > 0:
+        mod["acwr_7_28"] = (p7d / 7.0) / (p28d / 28.0)
 
     cf_prob = _predict_prob(mod, model_dict)
     pct = (orig_prob - cf_prob) / max(orig_prob, 1e-9) * 100.0
@@ -176,11 +188,15 @@ def find_optimal_pitch_count(
     results = []
     for count in range(search_range[0], search_range[1] + 1, 5):
         mod = pitcher_profile.copy()
-        scale = count / orig_count if orig_count > 0 else 1.0
+        delta = float(count) - orig_count
         mod["pitch_count"] = float(count)
-        for col in ("pitches_7d", "pitches_28d"):
+        for col in ("pitches_7d", "pitches_28d", "pitches_90d", "pitches_season_to_date"):
             if col in mod.index and pd.notna(mod[col]):
-                mod[col] = float(mod[col]) * scale
+                mod[col] = max(0.0, float(mod[col]) + delta)
+        p7d  = float(mod.get("pitches_7d",  0) or 0)
+        p28d = float(mod.get("pitches_28d", 0) or 0)
+        if "acwr_7_28" in mod.index and p28d > 0:
+            mod["acwr_7_28"] = (p7d / 7.0) / (p28d / 28.0)
         p = _predict_prob(mod, model_dict)
         results.append({"pitch_count": count, "predicted_prob": p})
 
@@ -192,4 +208,44 @@ def find_optimal_pitch_count(
         "min_prob": float(best_row["predicted_prob"]),
         "original_prob": orig_prob,
         "all_results": results,
+    }
+
+
+def simulate_injury_recency(
+    pitcher_profile: pd.Series,
+    days_since_injury: int,
+    model_dict: dict,
+) -> dict[str, float]:
+    """Estimate how days since last injury affects predicted risk.
+
+    days_since_last_injury is a rank-4 SHAP feature in the model (behind
+    prior_il_total, prior_il_days_lost, and fb_pct_30d_avg). This simulation
+    answers: holding injury count and severity constant, how much does the
+    RECENCY of the last injury affect predicted risk?
+
+    Only days_since_last_injury is modified; prior_il_total and prior_il_days_lost
+    are held fixed so the effect is isolated to injury timing, not history depth.
+
+    Args:
+        pitcher_profile: A single row of the feature matrix.
+        days_since_injury: Target days since last injury to simulate.
+        model_dict: Must contain 'xgb_pipeline' and 'feature_cols'.
+
+    Returns:
+        Dictionary with original_prob, counterfactual_prob, risk_reduction_pct.
+    """
+    orig_prob = _predict_prob(pitcher_profile, model_dict)
+    mod = pitcher_profile.copy()
+
+    if "days_since_last_injury" in mod.index:
+        mod["days_since_last_injury"] = float(days_since_injury)
+
+    cf_prob = _predict_prob(mod, model_dict)
+    pct = (orig_prob - cf_prob) / max(orig_prob, 1e-9) * 100.0
+
+    return {
+        "original_prob": orig_prob,
+        "counterfactual_prob": cf_prob,
+        "risk_reduction_pct": pct,
+        "days_since_injury": days_since_injury,
     }

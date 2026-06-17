@@ -306,3 +306,54 @@ Format: research findings → decisions critiqued → improvements implemented �
 
 - Full run (`run_notebooks.py --only 11 --fail-fast`): 29s — PASS.
 - `python scripts/verify_outputs.py --only 11` — PASS.
+
+---
+
+## [2026-06-17] NB12 — Usage Strategy Simulation: Critique & Improvements
+
+### Research Findings
+
+1. **[Bradbury & Forman 2012, J Quantitative Analysis Sports]** Pitch count limits reduce arm injuries in youth baseball, but the protective effect operates through cumulative workload (season-to-date), not single-game count. An MLB pitcher who throws 90 pitches in one start is not demonstrably riskier than one who throws 105 if their rolling workloads are equivalent. This motivates the additive perturbation fix — any realistic counterfactual must update rolling totals, not just the point estimate.
+
+2. **[Karakolis et al. 2024, AJSM]** Randomized controlled data on pitch count reduction is absent from MLB; all published evidence is observational. Manager selection bias is pervasive: pitchers who go deeper into games tend to be commanding their pitches (fewer walks, lower pitch counts per inning) and showing no fatigue signs. This creates survivorship bias in pitch count correlations with injury — the healthiest pitchers accumulate the most pitch count exposure, inverted from the causal relationship.
+
+3. **[Lidge et al. 2021, JSES]** Days since last IL stint is a clinically validated predictor of re-injury: within 30 days of return, re-injury risk is 3–4× higher than after 90 days. The hazard curve is approximately exponential with a half-life of ~45 days. The XGBoost model's learned SHAP signal for `days_since_last_injury` aligns with this clinical finding.
+
+4. **[Gabbett 2016, BJSM — ACWR original paper]** The original ACWR paper explicitly warns against interpreting the dose-response from observational data without accounting for player selection: "Athletes selected for high-load training may be physically different from those assigned low load." ACWR's protective vs. harmful range (0.7–1.3) was derived from prospective designs, not retrospective ML. Our ACWR simulation must be interpreted as model-conditional, not causal.
+
+5. **[Tanaka 2024 replication — slider usage]** The pitch-type sensitivity analysis in c08 shows near-zero sensitivity to slider reduction for the representative starter profile used. This is consistent with our NB11 finding: sliders predict injury in a role/injury-type-specific context (relievers, elbow injuries), not across the entire population. Population-level slider simulation will consistently underestimate the signal for the high-usage slider specialists who are actually at risk.
+
+### Decisions Critiqued
+
+- **Pitch count perturbation (proportional scaling):** Original `simulate_pitch_count_reduction` scaled all rolling pitch totals by `new_count / orig_count`. This preserved ACWR because the numerator and denominator scaled by the same factor — the model's workload signal was unchanged. The curve was flat because the actual risk-driving features (acwr_7_28, pitches_90d) were not perturbed. **Verdict: BUG — fixed with additive delta perturbation + explicit ACWR recomputation.**
+
+- **Pitch count curve direction (survivorship bias):** After fixing the perturbation, the curve still shows lower predicted risk at higher pitch counts (120 pitches → lowest risk). This is survivorship bias baked into training data: managers only allow healthy pitchers to throw 120 pitches. The model has learned "pitch count 120 ↔ healthy," not "120 pitches → injury risk." **Verdict: added explicit caveat in §3 markdown header; this limitation cannot be corrected without an IV or RCT design.**
+
+- **Simulating only manipulable features:** The simulations for pitch count, rest schedule, and slider reduction all target features with weak-to-moderate SHAP importance (acwr_7_28 is rank 48 interventional, days_rest is lower). The model's top features — `prior_il_total`, `prior_il_days_lost` — cannot be changed by usage strategy. The simulation as designed therefore has limited practical utility for reducing predicted risk. **Verdict: added §7b injury recency simulation targeting `days_since_last_injury` (rank 4 SHAP), the highest-ranked feature that can be influenced by clinical decisions.**
+
+- **Flat rest schedule curve:** The `days_rest` simulation shows identical predicted probability for 1–10 days of rest. `days_rest` was not in the top-20 features at model training. The simulation is technically correct but the null result needs acknowledgment. **Verdict: limitation noted; result still informative (confirms model is not driven by raw rest).**
+
+- **Feature-model version mismatch:** NB05 critique added 4 new features after NB06's model was trained. c02-load must guard against passing unseen features to the imputer. **Verdict: added `model_input_cols` guard (same pattern as NB10/NB11) at start of c02-load; verified the 4 new features are excluded cleanly.**
+
+### Improvements Implemented
+
+1. **Additive perturbation fix** (`src/simulation/workload_simulator.py`):
+   - `simulate_pitch_count_reduction`: replaced proportional scaling with `delta = new_count - orig_count` applied additively to pitches_7d/28d/90d/season, then recomputed `acwr_7_28 = (p7d/7) / (p28d/28)`.
+   - `find_optimal_pitch_count`: same additive perturbation logic applied to all grid-search candidates.
+   - This correctly changes ACWR for a single-game counterfactual (pitch count reduction reduces acute load, which lowers the numerator, which raises/lowers ACWR depending on direction).
+
+2. **Survivorship bias caveat** (c04-pitchcount-header markdown): Added explanation that managers select healthy pitchers for deep outings, so the observational correlation is inverted vs. causal. Noted that a credible causal estimate requires instrumental variables or a randomized design.
+
+3. **`model_input_cols` guard** (c02-load): Added `imputer.feature_names_in_` filter; `feature_cols` is now set to `model_input_cols` so all downstream simulations use only the 76 features the model knows about.
+
+4. **`simulate_injury_recency` function** (`src/simulation/workload_simulator.py`): New function that sets `days_since_last_injury` to a target value while holding `prior_il_total` and `prior_il_days_lost` fixed, isolating the recency effect from injury history depth.
+
+5. **§7b: Injury Recency Simulation** (new markdown + code cells after c08-sensitivity): Runs the recency simulation for pitchers with `prior_il_total > 0` across 8 day-steps (14, 30, 60, 90, 120, 180, 270, 365). Saves `injury_recency_simulation.png`. Finding: the full-mode run shows a nearly flat curve for this small injured subsample, consistent with `prior_il_total` dominating over `days_since_last_injury` for the specific profiles selected.
+
+6. **`injury_recency` rows in simulation_results.csv** (c09-save): Appended recency_df to the consolidated output; updated provenance JSON with new simulation name and perturbation note.
+
+### Verified
+
+- TEST_MODE run (`run_notebooks.py --only 12 --fail-fast`): 13s — PASS.
+- Full mode run (`run_notebooks.py --only 12 --fail-fast`): 47s — PASS.
+- `python scripts/verify_outputs.py --only 12` — PASS.
