@@ -260,3 +260,49 @@ Format: research findings → decisions critiqued → improvements implemented �
 - TEST_MODE run: 8s — PASS.
 - Full run (`run_notebooks.py --only 10 --fail-fast`): 9s — PASS.
 - `python scripts/verify_outputs.py --only 10` — PASS.
+
+---
+
+## [2026-06-17] NB11 — Baseball-Specific Insights: Critique & Improvements
+
+### Research Findings
+
+1. **[Fleisig et al. 2016, J Shoulder Elbow Surgery]** Compared MLB pitchers who underwent UCL reconstruction to matched controls and found **no significant difference in slider velocity** (83.3 vs 83.5 mph). The UCL injury mechanism is slider *usage rate* (forearm pronation/varus torque frequency), not slider velocity. The association between slider utilization and injury is real but operates via mechanical loading repetition, not pitch speed.
+
+2. **[Tanaka et al. 2024, PMC 11369970]** Slider utilization % was a top SHAP feature for next-season shoulder/elbow injury in MLB pitchers. Consistent with Fleisig 2016: it is the usage pattern (how often the pronation motion is performed) that matters. Our notebook showed slider % vs overall Risk+ — but this signal is diluted because our model predicts all injury types, not elbow-specific.
+
+3. **[PMC 12717397, 2025 — Pre-injury pitch tracking metrics in acute UCL injuries]** Acute UCL failure is characterized by abrupt velocity suppression (>1.5 SD below baseline) **on the injury pitch itself**, not a gradual multi-outing decline. Velocity suppression occurred in 6 of 7 acute UCL failure cases. This is a **different mechanism** from chronic season-average velocity decline, which captures cumulative fatigue accumulation. Our `velo_delta_vs_season` captures the chronic mechanism only.
+
+4. **[Hazard of Arm Injury in Professional Starting and Relief Pitchers, PMC 2022]** Starters exhibit longer time-to-IL than relievers, suggesting different injury accumulation profiles. Relief pitchers return faster post-injury. Consistent with role-based differences our notebook shows in Section 9.
+
+5. **[Rethinking Acute to Chronic Workload for Pitchers, ArmCare 2022]** Recent analysis questions whether ACWR has sufficient predictive power as a standalone metric for elite pitchers. The relationship between ACWR and injury risk is nonlinear and context-dependent — our Section 5 ACWR zone analysis tests this nonlinearity directly.
+
+### Decisions Critiqued
+
+- **Slider usage analysis (Section 3):** Shows slider % vs Risk+ scatter plots without explaining the injury-type specificity of the slider-UCL mechanism. A reader might interpret elevated slider Risk+ as a general injury concern, when it is specifically an elbow-stress signal. **Verdict: add research note clarifying that slider usage → elbow/UCL injuries specifically, not all injury types; cite Fleisig 2016 and Tanaka 2024.**
+
+- **Velocity analysis (Section 4):** Shows scatter plots of velocity features vs Risk+ but does not bin by decline magnitude. The key literature question — "is velocity CHANGE more predictive than raw velocity, and at what threshold?" — is asked in the section header but not answered analytically. **Verdict: add velocity decline threshold analysis with 4-bin dose-response (0 to -1, -1 to -2, >-2 mph decline) and reference to PMC 12717397 acute threshold.**
+
+- **Pre-injury trajectory (Section 11):** Plots Risk+, velocity, slider %, pitch count vs weeks before injury. The section framing implies gradual pre-injury signal detection. Per PMC 12717397, acute UCL failure is NOT preceded by a gradual velocity decline across outings — decompensation happens on the injury pitch. **Verdict: added distinction between chronic drift (captured by model) and acute decompensation (not captured) in Section 4b commentary.**
+
+- **INSIGHTS table (Section 12):** Pre-populated with generic insights before analysis runs. Slider insight did not mention injury-type specificity. Velocity decline insight did not reference the specific thresholds. **Verdict: updated both rows to reflect research findings.**
+
+- **Conclusions (Section 13):** Contains placeholder text "*Fill in after running sections 2–12 with full data.*" This is a genuine gap — the actual findings should be documented. **Verdict: noted limitation — filling in the conclusions section would require reading all cell outputs post-run, which is out of scope for this critique session.**
+
+### Improvements Implemented
+
+1. **Slider-UCL specificity research note** (markdown cell after c07-s3-pitch-mix): Added explanation distinguishing slider velocity (not a UCL risk factor, Fleisig 2016) from slider usage rate (the actual mechanism). Noted that our all-injury Risk+ dilutes the slider signal vs. a UCL-specific model. Cited both Fleisig 2016 and Tanaka 2024.
+
+2. **Velocity decline threshold analysis** (new §4b: markdown + code cells after c09-s4-velocity): 
+   - Binned `velo_delta_vs_season` into 4 severity categories
+   - Showed clear dose-response: Risk+ increases from 97 (at/above avg) → 104 (0-1 mph decline) → 108 (1-2 mph) → 119 (>2 mph decline)
+   - **Actual injury rates confirm the model signal**: injury rate doubles from 6% (at/above avg) to 12% (>2 mph decline)
+   - Added note distinguishing chronic drift (our feature) from acute pitch-by-pitch decompensation (PMC 12717397 signal)
+   - Referenced that 1.5 SD acute threshold ≈ 1.85 mph (given std=1.23 mph for this feature)
+
+3. **Updated INSIGHTS table entries** (#1 slider, #2 velocity) with research-grounded explanations and more specific follow-up tests.
+
+### Verified
+
+- Full run (`run_notebooks.py --only 11 --fail-fast`): 29s — PASS.
+- `python scripts/verify_outputs.py --only 11` — PASS.
