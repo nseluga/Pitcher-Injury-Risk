@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 FASTBALL_TYPES = {"FF", "SI", "FC"}
+SLIDER_TYPES = {"SL", "ST"}
 
 
 def compute_game_movement_stats(pitch_df: pd.DataFrame) -> pd.DataFrame:
@@ -69,8 +70,18 @@ def compute_game_movement_stats(pitch_df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(name="fb_spin_mean")
     )
 
+    # Slider-specific spin rate — Logue et al. (2021) found sliders with higher
+    # spin rate were independently associated with UCL injury risk.
+    sl = df[df["pitch_type"].isin(SLIDER_TYPES)]
+    sl_spin = (
+        sl.groupby(["pitcher", "game_date"])["release_spin_rate"]
+        .mean()
+        .reset_index(name="sl_spin_mean")
+    )
+
     out = agg_all.merge(agg_consistency, on=["pitcher", "game_date"], how="left")
     out = out.merge(fb_spin, on=["pitcher", "game_date"], how="left")
+    out = out.merge(sl_spin, on=["pitcher", "game_date"], how="left")
     return out
 
 
@@ -95,7 +106,7 @@ def compute_rolling_movement(
 
     roll_cols = ["pfx_x_mean", "pfx_z_mean", "spin_rate_mean",
                  "extension_mean", "rel_x_mean", "rel_z_mean",
-                 "fb_spin_mean"]
+                 "fb_spin_mean", "sl_spin_mean"]
     roll_cols = [c for c in roll_cols if c in game_df.columns]
 
     df = game_df.copy()
@@ -137,6 +148,7 @@ def compute_movement_deltas(game_df: pd.DataFrame) -> pd.DataFrame:
         ("extension_mean",  "extension_mean_30d_avg",  "extension_delta_30d"),
         ("rel_x_mean",      "rel_x_mean_30d_avg",      "rel_x_drift_30d"),
         ("rel_z_mean",      "rel_z_mean_30d_avg",      "rel_z_drift_30d"),
+        ("sl_spin_mean",    "sl_spin_mean_30d_avg",    "sl_spin_delta_30d"),
     ]
     for cur, base, delta in delta_pairs:
         if cur in df.columns and base in df.columns:

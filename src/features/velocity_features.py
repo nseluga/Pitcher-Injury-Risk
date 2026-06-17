@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 FASTBALL_TYPES = {"FF", "SI", "FC"}
+SLIDER_TYPES = {"SL", "ST"}
 
 
 def compute_game_velocity_stats(pitch_df: pd.DataFrame) -> pd.DataFrame:
@@ -56,11 +57,21 @@ def compute_game_velocity_stats(pitch_df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(name="all_velo_mean")
     )
 
-    # Intra-game velocity drop: first two innings vs. last two innings
+    # Intra-game velocity drop: first two innings vs. last two innings.
+    # Per-game max inning is used so starters exiting in inning 5-6 still get
+    # a valid reading. Using global max() here was a bug — most starters pitch
+    # fewer innings than the full-game max, so "late" would be empty for them.
     inning_col = "inning" if "inning" in df.columns else None
     if inning_col:
-        early = df[df[inning_col] <= 2]
-        late  = df[df[inning_col] >= (df[inning_col].max() - 1)]
+        game_max_inning = (
+            df.groupby(["pitcher", "game_date"])["inning"]
+            .max()
+            .reset_index(name="_game_max_inning")
+        )
+        df_inning = df.merge(game_max_inning, on=["pitcher", "game_date"], how="left")
+
+        early = df_inning[df_inning[inning_col] <= 2]
+        late  = df_inning[df_inning[inning_col] >= (df_inning["_game_max_inning"] - 1)]
         early_velo = (
             early[early["pitch_type"].isin(FASTBALL_TYPES)]
             .groupby(["pitcher", "game_date"])["release_speed"]
@@ -177,6 +188,8 @@ def build_velocity_features(pitch_df: pd.DataFrame) -> pd.DataFrame:
         Game-level DataFrame with all velocity feature columns.
     """
     game_velo = compute_game_velocity_stats(pitch_df)
-    game_velo = compute_rolling_velocity(game_velo, windows=[7, 30, 90])
+    # 14-day window added alongside 7/30/90 — Logue et al. (2021) identified the
+    # 15 games (~14 days for a starter) before surgery as the critical detection window.
+    game_velo = compute_rolling_velocity(game_velo, windows=[7, 14, 30, 90])
     game_velo = compute_velocity_delta(game_velo)
     return game_velo
