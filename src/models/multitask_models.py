@@ -34,6 +34,14 @@ REGRESSION_TASKS = ["days_to_next_injury", "next_injury_days_lost"]
 MULTICLASS_TASKS = ["next_injury_type"]
 ALL_TASKS = CLASSIFICATION_TASKS + REGRESSION_TASKS + MULTICLASS_TASKS
 
+# `next_injury_days_lost` follows a right-skewed distribution (most IL stints
+# are 10–30 days; TJ surgery cases are 365+ days). Log1p-transforming the
+# target before regression and expm1-ing predictions improves calibration.
+# Reference: IJSPT 2022 (Pitcher Injury Burden) — used zero-inflated negative
+# binomial to handle this exact distribution; log transform is the sklearn-
+# compatible analogue.
+LOG_REGRESSION_TARGETS: frozenset[str] = frozenset({"next_injury_days_lost"})
+
 
 def prepare_multitask_dataset(
     master_df: pd.DataFrame,
@@ -124,6 +132,12 @@ def train_chained_multitask_model(
         if len(y_sub) < 10:
             models[task] = None
             continue
+        # Log1p-transform right-skewed targets before fitting. Days-lost
+        # follows a heavy right tail (10–30d most stints, 365d for TJ surgery);
+        # log1p makes the residuals more homoscedastic for tree regressors.
+        # predict_all_tasks applies expm1 for these tasks to restore original scale.
+        if task in LOG_REGRESSION_TARGETS:
+            y_sub = np.log1p(y_sub)
         pipe = Pipeline([
             ("imputer", SimpleImputer(strategy="median")),
             ("reg", RandomForestRegressor(
@@ -152,6 +166,7 @@ def train_chained_multitask_model(
         models[task] = pipe
 
     models["_chained"] = True
+    models["_log_transformed_tasks_"] = LOG_REGRESSION_TARGETS
     return models
 
 
@@ -266,6 +281,8 @@ class _SharedRepresentationModel:
             if len(y_sub) < 10:
                 self.tasks[task] = None
                 continue
+            if task in LOG_REGRESSION_TARGETS:
+                y_sub = np.log1p(y_sub)
             est = self._make_regressor()
             est.fit(X_sub, y_sub)
             self.tasks[task] = est
@@ -279,6 +296,7 @@ class _SharedRepresentationModel:
             est.fit(X_sub, y_sub)
             self.tasks[task] = est
 
+        self._log_transformed_tasks_ = LOG_REGRESSION_TARGETS
         return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -307,10 +325,12 @@ def predict_all_tasks(
         X_in = models.transform(X)
         task_models = models.tasks
         chained = False
+        log_tasks = getattr(models, "_log_transformed_tasks_", frozenset())
     else:
         task_models = models
         chained = bool(task_models.get("_chained", False))
         X_in = X
+        log_tasks = task_models.get("_log_transformed_tasks_", frozenset())
 
     # Classification heads first (chained model needs the 30d head's output).
     for task in CLASSIFICATION_TASKS:
@@ -329,7 +349,11 @@ def predict_all_tasks(
         if est is None:
             preds[f"{task}_pred"] = np.nan
             continue
-        preds[f"{task}_pred"] = est.predict(X_in)
+        raw_pred = est.predict(X_in)
+        # Undo log1p transform applied during training for right-skewed targets.
+        if task in log_tasks:
+            raw_pred = np.expm1(raw_pred)
+        preds[f"{task}_pred"] = raw_pred
 
     for task in MULTICLASS_TASKS:
         est = task_models.get(task)

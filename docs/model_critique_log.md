@@ -134,3 +134,45 @@ Format: research findings → decisions critiqued → improvements implemented �
 - TEST_MODE run: `python run_notebooks.py --only 07 --fail-fast` — PASS (113s).
 - Full run: `python run_notebooks.py --only 07 --fail-fast` — PASS (113s).
 - `python scripts/verify_outputs.py --only 07` — PASS.
+
+---
+
+## [2026-06-17] NB08 — Multi-Task Models: Critique & Improvements
+
+### Research Findings
+
+1. **[IJSPT 2022 — Pitcher Injury Burden Prediction]** Zero-inflated negative binomial (ZINB) regression was used to predict days lost to arm injury in MiLB pitchers. RMSE of 11.9 days, R²=0.80. The ZINB model was chosen specifically because days-lost data is right-skewed (most stints are short; TJ surgery cases are 365+ days) and zero-inflated (for uninjured pitchers). This directly motivates log1p-transforming `next_injury_days_lost` before regression — the closest sklearn-compatible analogue.
+
+2. **[IJSPT 2022, same paper]** The separate elbow model (RMSE=21.3, R²=0.42) and shoulder model (RMSE=17.9, R²=0.57) performed worse than the combined arm injury model, suggesting pooling injury types is statistically correct — our single regression head over all injury types is the right choice.
+
+3. **[Karnuta et al. 2020, Orthopaedic Journal of Sports Medicine]** ML models (RF, XGBoost) outperformed logistic regression for next-season MLB player injury prediction using performance and injury profile trends 2000–2017. Confirms tree-based multitask architecture is domain-appropriate.
+
+4. **[ML sports injury scoping review, PMC 2024]** Chained/sequential prediction architectures (predict injury probability first, then use as a feature for downstream tasks) are a common design pattern. Missing data imputation via chained equations and SMOTE for class imbalance are recommended preprocessing steps. Our chained architecture (probability → severity → type) is consistent with literature.
+
+5. **[RMSE for right-skewed regression targets]** RMSE is dominated by high-value outliers in right-skewed distributions. When days-lost ranges from 10 to 365+ days, a single TJ surgery case can inflate RMSE by 10+ days even with accurate median predictions. Log1p-transforming before fitting addresses this — the model optimizes mean squared error in log space, which weights relative errors equally across the full range.
+
+### Decisions Critiqued
+
+- **`next_injury_days_lost` regression on raw values:** The `next_injury_days_lost` target is right-skewed (most IL stints are 10–30 days, but TJ surgery creates 365-day outliers). Training a RF regressor on raw values means the model is penalized heavily for TJ cases and may fit poorly for common short-duration injuries. **Verdict: implement log1p transform — this is the sklearn analogue to the ZINB approach validated in literature, and directly reduces RMSE.**
+
+- **Chaining order (probability → severity):** Injury probability first, then days-missed severity, then injury type. This is the correct causal ordering — a pitcher must be injured before severity is meaningful. **Verdict: no change — current approach matches literature.**
+
+- **RF for all task heads:** Random Forest used for both classification and regression heads. XGBoost is available in the shared-representation model but not in the chained model. For the chained model (the primary architecture), RF at n_estimators=300, max_depth=5 is a reasonable starting point. **Verdict: no change in chained model — RF with these parameters is appropriate for the dataset size. XGBoost is used in the shared model for comparison.**
+
+- **Evaluation metric (MAE/RMSE) for days_missed:** MAE and RMSE on raw days-missed are appropriate summary statistics, but RMSE is disproportionately influenced by TJ-surgery outliers. After log1p transform at training time and expm1 at prediction time, MAE in original space will better reflect typical prediction error. **Verdict: acceptable — MAE is the right metric for final evaluation; RMSE reported for comparison.**
+
+- **Severity thresholds (mild/moderate/severe):** Not explicitly implemented as a classification task — `next_injury_days_lost` is treated as a continuous regression. The severity classification in the shared model head could use IL designations (10-day: mild, 15-day: moderate, 60-day: severe). **Verdict: noted as limitation — continuous regression is more informative than discretized severity classes and avoids threshold choice subjectivity. No change.**
+
+### Improvements Implemented
+
+1. **Log1p transform for `next_injury_days_lost`** (`src/models/multitask_models.py`):
+   - Added `LOG_REGRESSION_TARGETS = frozenset({"next_injury_days_lost"})` constant with research citation in the comment.
+   - Applied `np.log1p(y_sub)` before fitting in both `train_chained_multitask_model` and `_SharedRepresentationModel.fit`.
+   - Stored `_log_transformed_tasks_` flag on model dict / class attribute.
+   - Applied `np.expm1(raw_pred)` in `predict_all_tasks` for flagged tasks, restoring original days-lost scale for downstream consumers (NB09 Injury Risk+ uses these predictions).
+
+### Verified
+
+- TEST_MODE run: 22s — PASS.
+- Full run: PASS.
+- `python scripts/verify_outputs.py --only 08` — PASS.

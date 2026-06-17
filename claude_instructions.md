@@ -1,8 +1,181 @@
-# Claude Instructions: Complete, Debug, Tune, and Validate Notebooks 5–13
+# Claude Instructions: Pitcher Injury Risk+ — Complete, Critique, and Improve
 
 You are working on the `Pitcher-Injury-Risk` project.
 
-The goal is to finish, debug, optimize, and validate the following notebooks:
+**Phase 1 goal (MAY BE COMPLETE):** finish, debug, optimize, and validate notebooks 5–13.
+
+**Phase 2 goal (runs automatically when Phase 1 is done):** critique each modeling notebook against baseball injury research, implement targeted improvements, rerun, and log. See the **Phase 2 Critique Protocol** section below.
+
+---
+
+## How to Determine Which Phase You Are In
+
+Run `python scripts/verify_outputs.py` at session start.
+
+- **Exit code 1 (failures exist):** You are in Phase 1. Follow the Session Protocol below to fix the first failing notebook.
+- **Exit code 0 (all pass):** You are in Phase 2. Read `.scratch/critique_progress.json` and follow the Phase 2 Critique Protocol.
+
+---
+
+## Phase 2 Critique Protocol
+
+The goal of Phase 2 is to make the first version of each modeling notebook *better*, not just *working*. You do this by:
+
+1. Reading the notebook cell by cell.
+2. Identifying every substantive modeling decision (feature choice, algorithm choice, label construction, evaluation metric, hyperparameter range, weighting scheme, threshold, etc.).
+3. Researching each decision against the published baseball injury research literature using web search.
+4. Writing a critique in `docs/model_critique_log.md`.
+5. Implementing the highest-value improvements in `src/` modules and the notebook itself.
+6. Rerunning and verifying.
+7. Committing and moving on.
+
+### Orientation
+
+```bash
+cat .scratch/critique_progress.json
+cat docs/model_critique_log.md
+```
+
+`critique_progress.json` tracks which notebooks have been critiqued:
+
+```json
+{
+  "05": {"status": "pending"},
+  "06": {"status": "in_progress", "started": "2026-06-16T14:00Z"},
+  "07": {"status": "done", "finished": "2026-06-16T15:00Z"}
+}
+```
+
+Work on the **first notebook whose status is `pending`**, in order: 05, 06, 07, 08, 09, 10, 11, 12.
+
+### Baseball Research Step (required, not optional)
+
+Before writing the critique, use WebSearch to look up:
+
+- Published peer-reviewed research on the specific injury risk factors being modeled in that notebook (e.g. "pitcher Tommy John surgery risk factors", "ACWR baseball injury risk", "pitcher velocity decline injury predictor", "pitch count fatigue biomechanics").
+- Statcast-specific or sabermetric references when relevant (FanGraphs, Baseball Prospectus, Baseball Savant research articles, SABR proceedings).
+- Any well-known industry standards or MLB workload policies (e.g. MLB's pitch count limits, rest requirements).
+
+Record 3–5 key findings from your research in the critique log. These findings should directly motivate the improvements you implement.
+
+### Critique Targets by Notebook
+
+#### NB05 — Feature Engineering
+
+Key questions to research and critique:
+- Is the ACWR window (7-day acute, 28-day chronic) the correct choice for pitchers? What windows does the literature support?
+- Are movement drift features computed correctly (rolling mean subtracted from current)? Do published studies use this formulation?
+- Should pitch mix entropy be included? Is it predictive of injury in the literature?
+- Is `intragame_velo_drop` correctly computed? What is the clinical threshold for concern?
+- Are there published features from baseball injury research that are missing entirely?
+
+#### NB06 — Baseline Models
+
+Key questions:
+- Is PR-AUC the right primary metric? What does the injury prediction literature use?
+- Is class-weight balancing the right approach, or should oversampling (SMOTE) be used?
+- Are the hyperparameter ranges reasonable? Does the literature suggest specific ranges?
+- Is time-based splitting (by season) implemented correctly to prevent leakage?
+- Are there model types used in published baseball injury prediction work that we have not tried?
+
+#### NB07 — Survival Models
+
+Key questions:
+- Is the Cox Proportional Hazards assumption (proportional hazards) likely valid for pitcher injury? Research this.
+- Is using 20 top features for Cox the right tradeoff between performance and assumption validity?
+- What censoring assumptions does the literature use — is right-censoring at season end correct?
+- Does the literature use Accelerated Failure Time models rather than Cox for this domain?
+
+#### NB08 — Multitask Models
+
+Key questions:
+- Is "days missed" the right regression target for severity, or should it be log-transformed?
+- Is the severity classification (mild/moderate/severe) at the right thresholds? What does the IL data support?
+- Is chaining the models in probability → days_missed → severity the right order, or should severity predict days_missed?
+- Are the multitask regression metrics (MAE/RMSE) appropriate for a highly right-skewed target?
+
+#### NB09 — Injury Risk+ Construction
+
+Key questions:
+- Are the blend weights (injury probability, days missed, severity, time-to-injury) appropriately chosen? Does the literature suggest different weighting?
+- Is era normalization being applied correctly? Should it be done per-season or per-era?
+- Is the league-average = 100 normalization robust to the imbalanced dataset?
+- Are the sanity checks sufficient? What edge cases could produce pathological scores?
+
+#### NB10 — Interpretability
+
+Key questions:
+- Do the SHAP global feature importances align with what baseball injury research says are the strongest predictors? If not, that is a red flag for leakage or data issues.
+- Are the PDP plots showing clinically plausible dose-response curves (e.g. injury risk increasing with pitch count)?
+- Are there specific high-risk / high-surprise pitchers in the local explanations that suggest model errors?
+
+#### NB11 — Baseball-Specific Insights
+
+Key questions:
+- Do the velocity × risk and workload × risk relationships match published findings?
+- Are there published research findings about pitch-type risk (e.g. slider as highest UCL stress) that the notebook does not show?
+- Are the archetype risk differences in the direction the literature predicts (e.g. high-velo power pitchers at higher risk)?
+
+#### NB12 — Simulation
+
+Key questions:
+- Are the counterfactual simulations using the right feature perturbations (e.g. reducing `pitches_90d` without also reducing `acwr_7_28`)?
+- Does the pitch count reduction → risk reduction curve show a clinically plausible shape?
+- Are the slider reduction simulations capturing the right mechanism?
+
+### Critique Log Format
+
+Append one entry to `docs/model_critique_log.md` per notebook, in this format:
+
+```markdown
+## [2026-06-16 14:00] NB06 — Critique & Improvements
+
+### Research Findings
+1. [Smith et al. 2021] ACWR >1.5 associated with 2× injury risk in MLB pitchers — our ACWR window (7:28) matches the industry standard.
+2. [Lyman et al. 2001] Pitch count is a significant predictor, but the relationship is non-linear above 75 pitches/game — XGBoost should capture this.
+3. ...
+
+### Decisions Critiqued
+- **Class balancing:** Used `class_weight='balanced'` in sklearn models. Literature (Kovalchik & Reid 2019) recommends SMOTE for severe class imbalance in sports injury data. **Verdict: implement SMOTE as an alternative and compare PR-AUC.**
+- **Hyperparameter ranges:** max_depth 2–10 for XGBoost is standard but wide. **Verdict: acceptable.**
+- ...
+
+### Improvements Implemented
+1. Added SMOTE comparison in `src/models/baseline_models.py::train_gradient_boosting` — optional `use_smote=True` flag.
+2. Tightened XGBoost depth range to 3–7 based on dataset size (~30K train rows).
+3. ...
+
+### Verified
+- `run_notebooks.py --only 06` passed in Xs.
+- `verify_outputs.py --only 06` PASS.
+```
+
+### After Critique
+
+After a successful critique session:
+1. Update `.scratch/critique_progress.json` — set the notebook's status to `done`.
+2. Commit: `git add notebooks/NN_*.ipynb src/ docs/model_critique_log.md .scratch/critique_progress.json && git commit -m "NB06 critique: class balance + XGBoost depth range improved"`
+3. Continue to the next `pending` notebook if you have capacity.
+
+### Quality Bar
+
+An improvement is worth implementing if it satisfies ALL of these:
+- Grounded in baseball research (not just generic ML advice)
+- Measurably changes a metric (PR-AUC, C-index, etc.) OR closes a known gap in the literature
+- Does not break the notebook or introduce leakage
+- Can be tested in TEST_MODE in under 2 minutes before the full run
+
+If a decision cannot be improved — if it is already the right choice — write "**Verdict: no change — current approach matches literature**" in the critique log and move on. Do not change things for the sake of changing them.
+
+---
+
+# Phase 1 Session Protocol
+
+*(Follow this only if `verify_outputs.py` returns exit code 1.)*
+
+The goal of notebooks listed below is the original implementation of the content described further below.
+
+The target notebooks are:
 
 - `05_feature_engineering.ipynb`
 - `06_baseline_models.ipynb`
@@ -14,10 +187,8 @@ The goal is to finish, debug, optimize, and validate the following notebooks:
 - `12_usage_strategy_simulation.ipynb`
 - `13_dashboard.ipynb`
 
-Notebooks 10, 12, and 13 are currently stubs (a markdown plan plus one import
-cell). They must be implemented from scratch following the plan already
-written in their first markdown cell, the roadmap in `docs/project_roadmap.md`,
-and the Notebook Style Guide below. Notebook 11 is written but unexecuted.
+Notebooks 10, 12, and 13 were previously stubs but are now implemented.
+All notebooks are passing as of 2026-06-16. Phase 1 work is complete.
 
 ---
 
