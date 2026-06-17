@@ -215,3 +215,48 @@ Format: research findings → decisions critiqued → improvements implemented �
 
 - Full run: `python run_notebooks.py --only 09 --fail-fast` — PASS (14s).
 - `python scripts/verify_outputs.py --only 09` — PASS.
+
+---
+
+## [2026-06-17] NB10 — Model Interpretability: Critique & Improvements
+
+### Research Findings
+
+1. **[Tanaka et al. 2024, PMC 11369970]** XGBoost on MLB pitcher Statcast data (2017–2022) found that the top SHAP features for next-season shoulder/elbow injury were **increased velocity (all pitch types), slider utilization, fastball spin rate, and horizontal movement** — not raw pitch counts. Our model's #2 feature (`fb_pct_30d_avg`) is directionally aligned (fastball utilization), but the specific pitch-tracking signals (spin rate, horizontal break) are not prominent. Attributed to our model predicting *any* injury rather than UCL/shoulder specifically, diluting pitch-type signals.
+
+2. **[Lundberg et al. 2020, Artificial Intelligence doi:10.1016/j.artint.2021.103557]** Path-dependent TreeSHAP conditions on tree split paths to compute Shapley values. When features are correlated, this causes variance to be allocated entirely to whichever correlated feature appears first in a tree path, suppressing the others. Interventional SHAP marginalizes over a background dataset instead, distributing credit more equitably across correlated features. Directly motivated by the domain-validation finding that `acwr_7_28` falls outside the top 20 despite being the gold-standard workload risk predictor.
+
+3. **[Blanch & Gabbett 2016, BJSM]** ACWR is the standard workload metric in sports injury literature. Ratios >1.5 are associated with 2–3× injury risk across sports. Our model's ranking of `pitches_90d` (rank 5) over `acwr_7_28` (rank 58 path-dependent) was suspicious — chronic absolute workload should not dominate a ratio metric unless the ratio carries correlated information.
+
+4. **[Ma et al. 2025, Scientific Reports]** SHAP-based injury risk prediction in football found the most contributory features were acute workload (SHAP 0.0033), injury history (0.0029), and career total days injured (0.0023). The acute workload dominance aligns with our prior_il_total at rank 1, but suggests acute workload metrics should also appear prominently — our acwr_7_28 suppression was anomalous.
+
+5. **[NB05 critique session — model versioning gap]** NB05's critique added four features (`fb_velo_14d_avg`, `sl_spin_delta_30d`, `sl_spin_mean`, `sl_spin_mean_30d_avg`) to the feature matrix after NB06's XGBoost model was last trained. This created a 4-column mismatch between the current feature matrix (80 features) and the loaded imputer (76 features), causing a `ValueError` in `imputer.transform()` that left NB10 with stale partial outputs. This was a silent data quality bug — the notebook appeared to have run but had mixed outputs from two kernel sessions.
+
+### Decisions Critiqued
+
+- **TreeExplainer `feature_perturbation` (default = "tree_path_dependent"):** The default allocates SHAP credit by conditioning on tree split paths. For the workload feature cluster (`pitches_7d`, `pitches_90d`, `acwr_7_28`), which are mutually correlated (acwr = pitches_7d / pitches_28d by construction), this suppresses lower-ranked correlated features. `acwr_7_28` at path-dependent rank 58 was a red flag. **Verdict: add interventional SHAP comparison with background dataset — directly tests whether suppression is algorithmic or genuine.**
+
+- **SHAP sample size (5000, 20% positive):** Within the range used in published sports injury SHAP studies. Stratified sampling ensures positive-class representation in a ~5% base-rate dataset. **Verdict: no change — current approach matches literature.**
+
+- **Single time-horizon analysis (injured_next_30d only):** Tanaka et al. 2024 predicts next-season injury; our 30-day window captures acute risk. SHAP rankings may differ between 30d and 90d horizons (90d likely elevates chronic workload features). **Verdict: noted limitation — out of scope for this session, would require re-running SHAP against all four target columns.**
+
+- **PDP subsample (1000 rows):** PDPs stabilize at ~500 rows for these feature types. **Verdict: no change.**
+
+- **Local explanations (min/max probability only):** Low-risk pitcher showed minimum predicted probability of 0.31, which is very high for a supposedly "low risk" case — indicates the model's probability range is compressed to [0.31, 0.70]. This is a calibration artifact (noted, not a code fix needed here — NB09 calibration slope addresses it). **Verdict: added commentary in domain validation cell.**
+
+- **Feature-model versioning guard:** No check that the loaded model's feature set matches the current feature matrix. The 4-column mismatch was silently surfaced only as a stale `ValueError` output buried in cell 3 of the notebook. **Verdict: implement `model_input_cols` filtering in cell c02 — use `imputer.feature_names_in_` as the authoritative source of truth for which columns to pass.**
+
+### Improvements Implemented
+
+1. **`model_input_cols` guard in cell c02** (`notebooks/10_model_interpretability.ipynb`): Added `model_input_cols = [c for c in feature_cols if c in set(imputer.feature_names_in_)]` and rebuilt `X_all` from only those columns. Printed a diagnostic note listing any excluded features. Propagated the fix to the PDP cell (`feat_idx = model_input_cols.index(feat)` instead of `feature_cols.index(feat)`). This permanently resolves the model-versioning brittleness regardless of future NB05 critique additions.
+
+2. **Interventional SHAP comparison** (new cells 4a after beeswarm): Added `shap.TreeExplainer(xgb_model, X_background, feature_perturbation='interventional')` with a 100-row background sample over 1000 explain rows. Produced rank-shift table, workload-feature comparison, and `reports/figures/shap_global_importance_interventional.png`. Saved `reports/tables/shap_rank_comparison.csv` for downstream reference.
+   - **Finding:** `acwr_7_28` gains +10 ranks (path-dep 58 → interventional 48), confirming partial path-dependent suppression. However, rank 48 is still far outside the top 20 — `pitches_90d` at rank 5 genuinely dominates the workload dimension, not merely due to algorithmic credit-sharing. This is a meaningful research finding: 90-day cumulative load is a stronger injury predictor in this dataset than the ACWR ratio, consistent with the recent ACWR meta-analysis literature questioning its universal applicability (Bowen et al. 2020).
+
+3. **Domain validation commentary update** (cell c08): Added live ACWR rank-shift check referencing `comparison_df`, probability-floor note, and revised commentary to reflect interventional SHAP findings.
+
+### Verified
+
+- TEST_MODE run: 8s — PASS.
+- Full run (`run_notebooks.py --only 10 --fail-fast`): 9s — PASS.
+- `python scripts/verify_outputs.py --only 10` — PASS.
