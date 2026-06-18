@@ -1,9 +1,10 @@
 #!/bin/bash
-# Autonomous notebook loop — two phases:
+# Autonomous notebook loop — three phases:
 #
-#   Phase 1 (fix):     verify_outputs.py fails → fix the first broken notebook.
-#   Phase 2 (critique): verify_outputs.py passes → baseball-research critique &
-#                        improve each modeling notebook in order.
+#   Phase 1 (fix):       verify_outputs.py fails → fix the first broken notebook.
+#   Phase 2 (critique):  verify_outputs.py passes, critiques pending → research critique & improve.
+#   Phase 3A (improve):  all critiques done, improvement not converged → iterative model improvement.
+#   Phase 3B (dashboard): improvement converged, dashboard not done → build unified Streamlit dashboard.
 #
 # Usage:
 #   ./run_project.sh [max_iterations]   default 12
@@ -18,8 +19,8 @@ mkdir -p logs .scratch
 PYTHON="python3"
 [ -x "$PROJECT_ROOT/.venv/bin/python" ] && PYTHON="$PROJECT_ROOT/.venv/bin/python"
 
-export BASH_DEFAULT_TIMEOUT_MS=600000      # 10 min default
-export BASH_MAX_TIMEOUT_MS=14400000       # 4 hr ceiling
+export BASH_DEFAULT_TIMEOUT_MS=600000
+export BASH_MAX_TIMEOUT_MS=14400000
 
 # ---------------------------------------------------------------------------
 # PHASE 1 PROMPT — fix the first failing notebook
@@ -65,44 +66,121 @@ Step-by-step:
 3. Read the target notebook cell by cell. List every key modeling decision.
 
 4. Use WebSearch to research 3-5 relevant baseball injury papers or industry
-   references. Specific queries to try:
-   - For NB05: "ACWR acute chronic workload ratio baseball pitchers injury"
-   - For NB06: "machine learning pitcher injury prediction class imbalance"
-   - For NB07: "cox proportional hazards baseball pitcher survival analysis"
-   - For NB08: "injury severity prediction baseball days missed distribution"
-   - For NB09: "injury risk score normalization era adjustment baseball"
-   - For NB10: "SHAP pitcher injury features importance validation"
-   - For NB11: "slider pitch UCL injury risk pitcher mechanics"
-   - For NB12: "pitcher workload reduction injury risk counterfactual"
-   Adapt queries based on what you actually find in the notebook.
+   references. Adapt queries based on what you actually find in the notebook.
 
-5. Write a critique section in docs/model_critique_log.md following the format
-   in the Phase 2 Critique Protocol in claude_instructions.md.
+5. Write a critique section in docs/model_critique_log.md.
 
-6. Implement the highest-value improvements. Quality bar: grounded in research,
-   measurably changes a metric or closes a literature gap, does not break anything.
+6. Implement the highest-value improvements grounded in research.
 
-7. Run TEST_MODE first to verify the notebook runs without errors:
-   python run_notebooks.py --only NN --fail-fast
-   (with TEST_MODE=True in the notebook or a small sample)
-
-8. Run full if TEST_MODE passes:
+7. Run TEST_MODE first, then full:
    python run_notebooks.py --only NN --fail-fast
 
-9. Verify: python scripts/verify_outputs.py --only NN
+8. Verify: python scripts/verify_outputs.py --only NN
 
-10. Update .scratch/critique_progress.json — set the notebook to "done".
+9. Update .scratch/critique_progress.json — set the notebook to "done".
 
-11. Commit:
+10. Commit:
     git add notebooks/NN_*.ipynb src/ docs/model_critique_log.md .scratch/critique_progress.json
     git commit -m "NBxx critique: <one-line summary of main improvement>"
-
-12. If you have capacity and the session is not long, move to the next pending notebook.
 
 IMPORTANT: do NOT run a notebook without first checking for a running process:
 ps aux | grep -E "run_notebooks|jupyter|nbconvert" | grep -v grep
 
 IMPORTANT: After launching a notebook, STOP IMMEDIATELY. Do not poll.'
+
+# ---------------------------------------------------------------------------
+# PHASE 3A PROMPT — iterative model improvement
+# ---------------------------------------------------------------------------
+IMPROVE_PROMPT='Read claude_instructions.md and follow the Phase 3A Model Improvement Protocol.
+
+The models currently achieve PR-AUC ~0.127–0.137 on the 30-day injury prediction
+task (temporal CV, folds 1-4). This is only slightly above the naive baseline (~0.10).
+Your job is to run ONE improvement round this session: research, implement, test,
+measure the PR-AUC delta, log, and commit.
+
+Step-by-step:
+
+1. Orient — read what has already been tried:
+   cat .scratch/improvement_progress.json 2>/dev/null || echo "NOT STARTED"
+   cat docs/model_improvement_log.md 2>/dev/null | tail -120
+   cat reports/tables/baseline_model_metrics.csv
+
+2. Pick the next untried improvement idea from the Phase 3A section of
+   claude_instructions.md. Do not repeat anything already logged. If
+   improvement_progress.json does not exist, create it with the baseline
+   metrics and status "in_progress".
+
+3. Run 1-2 targeted WebSearches to ground the idea in research evidence.
+
+4. Implement the change (usually NB05, NB06, NB07, or src/).
+
+5. Test:
+   python run_notebooks.py --only NN --fail-fast  (TEST_MODE first)
+   python run_notebooks.py --only NN --fail-fast  (full run)
+   python scripts/verify_outputs.py --only NN
+
+6. Measure PR-AUC delta (temporal CV mean, folds 1-4, 30-day horizon).
+
+7. If the change hurt metrics, revert it:
+   git checkout notebooks/NN_*.ipynb src/
+
+8. Log results in docs/model_improvement_log.md following the format in
+   claude_instructions.md.
+
+9. Update .scratch/improvement_progress.json with the round result and
+   increment consecutive_non_improvements if delta < 0.005.
+
+10. If consecutive_non_improvements >= 3 OR rounds_completed >= 10:
+    set _meta.status = "converged" in improvement_progress.json.
+
+11. Commit:
+    git add notebooks/ src/ docs/model_improvement_log.md .scratch/improvement_progress.json reports/
+    git commit -m "Phase 3A round N: [description] (PR-AUC +X.XXX)"
+
+IMPORTANT: do NOT run a notebook without first checking for a running process:
+ps aux | grep -E "run_notebooks|jupyter|nbconvert" | grep -v grep
+
+IMPORTANT: After launching a notebook, STOP IMMEDIATELY. Do not poll.'
+
+# ---------------------------------------------------------------------------
+# PHASE 3B PROMPT — unified analysis dashboard
+# ---------------------------------------------------------------------------
+DASHBOARD_PROMPT='Read claude_instructions.md and follow the Phase 3B Dashboard Protocol.
+
+Model improvement is converged. Your job is to build (or continue building) a
+unified Streamlit analysis dashboard at dashboard/app.py that combines all four
+NB13 prototype components into a genuinely usable tool.
+
+Step-by-step:
+
+1. Orient:
+   cat .scratch/dashboard_progress.json 2>/dev/null || echo "NOT STARTED"
+   python3 -c "
+import json
+nb = json.load(open(\"notebooks/13_dashboard.ipynb\"))
+for i, cell in enumerate(nb[\"cells\"]):
+    src = \"\".join(cell[\"source\"])[:100].replace(\"\\n\",\" \")
+    print(f\"[{i}] {cell[\"cell_type\"]}: {src}\")
+"
+
+2. Check if Streamlit is installed for the pitcher311 environment:
+   /opt/homebrew/opt/python@3.11/bin/python3.11 -c "import streamlit; print(streamlit.__version__)" 2>/dev/null
+   If not: /opt/homebrew/opt/python@3.11/bin/pip3.11 install streamlit
+
+3. Implement dashboard/app.py following the Phase 3B section of
+   claude_instructions.md. Port logic from NB13 cells. Use @st.cache_data
+   for all data loads. All four panels must work with real data.
+
+4. Confirm the app launches without errors (check for import errors, missing
+   data paths, etc.) by examining the code logic. Do not spin up a server
+   process during this session.
+
+5. Update .scratch/dashboard_progress.json:
+   {"status": "done", "launch_command": "/opt/homebrew/opt/python@3.11/bin/streamlit run dashboard/app.py", "panels_complete": [...]}
+
+6. Commit:
+   git add dashboard/ .scratch/dashboard_progress.json
+   git commit -m "Phase 3B: unified Streamlit analysis dashboard"'
 
 # ---------------------------------------------------------------------------
 # MAIN LOOP
@@ -121,13 +199,24 @@ for i in $(seq 1 "$MAX_ITERS"); do
         exit 0
     fi
 
-    # Determine phase.
-    if "$PYTHON" scripts/verify_outputs.py 2>&1 | tee "logs/verify_$(date +%Y%m%d)_iter${i}.log"; then
-        # ----------------------------------------------------------------
-        # Phase 2: all notebooks pass — run critique/improve loop
-        # ----------------------------------------------------------------
+    # ----------------------------------------------------------------
+    # Phase 1 vs Phase 2+ gating
+    # ----------------------------------------------------------------
+    if ! "$PYTHON" scripts/verify_outputs.py 2>&1 | tee "logs/verify_$(date +%Y%m%d)_iter${i}.log"; then
+        echo ""
+        echo "Verifier reports failures — starting Phase 1 fix session $i..."
+        claude -p "$FIX_PROMPT" \
+            --allowedTools "Read,Write,Edit,NotebookEdit,Glob,Grep,TodoWrite,Bash(ls *),Bash(find *),Bash(mkdir *),Bash(ps *),Bash(grep *),Bash(tail *),Bash(cat *),Bash(python *),Bash(python3 *),Bash(.venv/bin/python *),Bash(/opt/homebrew/opt/python@3.11/bin/python3.11 *),Bash(pytest *),Bash(python -m pytest *),Bash(jupyter *),Bash(git status*),Bash(git diff*),Bash(git log*),Bash(git add *),Bash(git commit *)" \
+            --permission-mode acceptEdits \
+            --max-turns 80 \
+            --verbose \
+            2>&1 | tee "logs/run_$(date +%Y%m%d)_iter${i}.log"
+        echo "Claude fix session $i finished."
 
-        # Check if all notebooks have been critiqued.
+    else
+        # All notebooks passing — determine which sub-phase to run.
+
+        # Phase 2: pending critiques?
         CRITIQUE_JSON=".scratch/critique_progress.json"
         if [ -f "$CRITIQUE_JSON" ]; then
             PENDING=$(python3 -c "
@@ -136,43 +225,78 @@ data = json.load(open('$CRITIQUE_JSON'))
 pending = [k for k,v in data.items() if v.get('status') == 'pending']
 print(len(pending))
 " 2>/dev/null || echo "unknown")
-            if [ "$PENDING" = "0" ]; then
-                echo ""
-                echo "✓ Phase 2 complete: all modeling notebooks have been critiqued and improved."
-                exit 0
-            fi
+        else
+            PENDING="unknown"
         fi
 
-        echo ""
-        echo "Phase 1 complete. Entering Phase 2 critique session $i..."
+        if [ "$PENDING" != "0" ] && [ "$PENDING" != "" ]; then
+            echo ""
+            echo "Phase 2 critique pending — starting critique session $i..."
+            claude -p "$CRITIQUE_PROMPT" \
+                --allowedTools "Read,Write,Edit,NotebookEdit,Glob,Grep,TodoWrite,WebSearch,WebFetch,Bash(ls *),Bash(find *),Bash(mkdir *),Bash(ps *),Bash(grep *),Bash(tail *),Bash(cat *),Bash(python *),Bash(python3 *),Bash(.venv/bin/python *),Bash(/opt/homebrew/opt/python@3.11/bin/python3.11 *),Bash(pytest *),Bash(python -m pytest *),Bash(jupyter *),Bash(git status*),Bash(git diff*),Bash(git log*),Bash(git add *),Bash(git commit *)" \
+                --permission-mode acceptEdits \
+                --max-turns 80 \
+                --verbose \
+                2>&1 | tee "logs/critique_$(date +%Y%m%d)_iter${i}.log"
+            echo "Claude critique session $i finished."
 
-        claude -p "$CRITIQUE_PROMPT" \
-            --allowedTools "Read,Write,Edit,NotebookEdit,Glob,Grep,TodoWrite,WebSearch,WebFetch,Bash(ls *),Bash(find *),Bash(mkdir *),Bash(ps *),Bash(grep *),Bash(tail *),Bash(cat *),Bash(python *),Bash(python3 *),Bash(.venv/bin/python *),Bash(/opt/homebrew/opt/python@3.11/bin/python3.11 *),Bash(pytest *),Bash(python -m pytest *),Bash(jupyter *),Bash(git status*),Bash(git diff*),Bash(git log*),Bash(git add *),Bash(git commit *)" \
-            --permission-mode acceptEdits \
-            --max-turns 80 \
-            --verbose \
-            2>&1 | tee "logs/critique_$(date +%Y%m%d)_iter${i}.log"
+        else
+            # Phase 2 done. Check Phase 3A (improvement) convergence.
+            IMPROVE_JSON=".scratch/improvement_progress.json"
+            IMPROVE_STATUS="not_started"
+            if [ -f "$IMPROVE_JSON" ]; then
+                IMPROVE_STATUS=$(python3 -c "
+import json, sys
+data = json.load(open('$IMPROVE_JSON'))
+print(data.get('_meta', {}).get('status', 'in_progress'))
+" 2>/dev/null || echo "in_progress")
+            fi
 
-        echo "Claude critique session $i finished."
+            if [ "$IMPROVE_STATUS" != "converged" ]; then
+                echo ""
+                echo "Phase 3A model improvement — starting improvement session $i..."
+                claude -p "$IMPROVE_PROMPT" \
+                    --allowedTools "Read,Write,Edit,NotebookEdit,Glob,Grep,TodoWrite,WebSearch,WebFetch,Bash(ls *),Bash(find *),Bash(mkdir *),Bash(ps *),Bash(grep *),Bash(tail *),Bash(cat *),Bash(python *),Bash(python3 *),Bash(.venv/bin/python *),Bash(/opt/homebrew/opt/python@3.11/bin/python3.11 *),Bash(pytest *),Bash(python -m pytest *),Bash(jupyter *),Bash(git status*),Bash(git diff*),Bash(git log*),Bash(git add *),Bash(git commit *)" \
+                    --permission-mode acceptEdits \
+                    --max-turns 80 \
+                    --verbose \
+                    2>&1 | tee "logs/improve_$(date +%Y%m%d)_iter${i}.log"
+                echo "Claude improvement session $i finished."
 
-    else
-        # ----------------------------------------------------------------
-        # Phase 1: notebooks failing — fix loop
-        # ----------------------------------------------------------------
-        echo ""
-        echo "Verifier reports failures — starting Phase 1 fix session $i..."
+            else
+                # Phase 3A converged. Check Phase 3B (dashboard).
+                DASH_JSON=".scratch/dashboard_progress.json"
+                DASH_STATUS="not_started"
+                if [ -f "$DASH_JSON" ]; then
+                    DASH_STATUS=$(python3 -c "
+import json, sys
+data = json.load(open('$DASH_JSON'))
+print(data.get('status', 'not_started'))
+" 2>/dev/null || echo "not_started")
+                fi
 
-        claude -p "$FIX_PROMPT" \
-            --allowedTools "Read,Write,Edit,NotebookEdit,Glob,Grep,TodoWrite,Bash(ls *),Bash(find *),Bash(mkdir *),Bash(ps *),Bash(grep *),Bash(tail *),Bash(cat *),Bash(python *),Bash(python3 *),Bash(.venv/bin/python *),Bash(/opt/homebrew/opt/python@3.11/bin/python3.11 *),Bash(pytest *),Bash(python -m pytest *),Bash(jupyter *),Bash(git status*),Bash(git diff*),Bash(git log*),Bash(git add *),Bash(git commit *)" \
-            --permission-mode acceptEdits \
-            --max-turns 80 \
-            --verbose \
-            2>&1 | tee "logs/run_$(date +%Y%m%d)_iter${i}.log"
+                if [ "$DASH_STATUS" != "done" ]; then
+                    echo ""
+                    echo "Phase 3B dashboard — starting dashboard session $i..."
+                    claude -p "$DASHBOARD_PROMPT" \
+                        --allowedTools "Read,Write,Edit,NotebookEdit,Glob,Grep,TodoWrite,Bash(ls *),Bash(find *),Bash(mkdir *),Bash(ps *),Bash(grep *),Bash(tail *),Bash(cat *),Bash(python *),Bash(python3 *),Bash(.venv/bin/python *),Bash(/opt/homebrew/opt/python@3.11/bin/python3.11 *),Bash(pip *),Bash(pip3 *),Bash(git status*),Bash(git diff*),Bash(git log*),Bash(git add *),Bash(git commit *)" \
+                        --permission-mode acceptEdits \
+                        --max-turns 80 \
+                        --verbose \
+                        2>&1 | tee "logs/dashboard_$(date +%Y%m%d)_iter${i}.log"
+                    echo "Claude dashboard session $i finished."
 
-        echo "Claude fix session $i finished."
+                else
+                    echo ""
+                    echo "✓ All phases complete: models improved and dashboard built."
+                    afplay /System/Library/Sounds/Funk.aiff
+                    exit 0
+                fi
+            fi
+        fi
     fi
 
-    # If Claude launched a notebook, exit so the laptop can run it alone.
+    # If Claude launched a notebook, exit so it can run without burning Claude quota.
     if ps aux | grep -E "run_notebooks|jupyter|nbconvert" | grep -v grep >/dev/null; then
         echo "Notebook execution launched. Exiting so it can run without burning Claude quota."
         ps aux | grep -E "run_notebooks|jupyter|nbconvert" | grep -v grep
@@ -183,10 +307,5 @@ print(len(pending))
 done
 
 echo ""
-if "$PYTHON" scripts/verify_outputs.py; then
-    echo "✓ All notebooks complete and verified."
-    exit 0
-fi
-
-echo "✗ Did not converge after $MAX_ITERS iterations. See logs/ and .scratch/verification.json."
+echo "✗ Did not converge after $MAX_ITERS iterations. See logs/ and .scratch/."
 exit 1
