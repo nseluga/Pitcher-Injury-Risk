@@ -187,19 +187,26 @@ def compute_seasonal_risk_plus(
     if survival_model is not None:
         from src.models.survival_models import predict_survival_function
         surv = predict_survival_function(survival_model, X, time_points=[30])
-        # Hazard proxy: probability of an event by day 30 == 1 - S(30).
         components["hazard_rate"] = 1.0 - surv["S(30)"].values
 
-    risk_df = master_df[["pitcher", "season"]].copy()
-    risk_df = risk_df.rename(columns={"pitcher": "pitcher_id"})
-    risk_df["archetype"] = _archetype_for(master_df).values
+    # Aggregate per-appearance predictions to pitcher-season level before
+    # blending and normalizing. Normalization must happen at pitcher-season
+    # grain so that mean=100 holds when scores are reported at that level.
+    app_df = master_df[["pitcher", "season"]].copy().rename(columns={"pitcher": "pitcher_id"})
+    app_df["archetype"] = _archetype_for(master_df).values
     for col in components.columns:
-        risk_df[col] = components[col].values
+        app_df[col] = components[col].values
+
+    component_cols = [c for c in ["injury_prob_30d", "expected_days_lost", "hazard_rate"]
+                      if c in app_df.columns]
+    risk_df = (
+        app_df.groupby(["pitcher_id", "season", "archetype"], observed=True)[component_cols]
+        .mean()
+        .reset_index()
+    )
 
     risk_df = compute_raw_risk_score(risk_df, weights=weights)
 
-    # Build the normalization reference from this same population (in-sample),
-    # then apply it group-wise so each season-archetype group means ~100.
     reference_df = build_normalization_reference(risk_df)
 
     irp = pd.Series(index=risk_df.index, dtype=float)

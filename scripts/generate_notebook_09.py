@@ -218,10 +218,19 @@ final scores.\
 """
 
 C5 = """\
-risk_df = fm[['pitcher', 'season']].copy().rename(columns={'pitcher': 'pitcher_id'})
-risk_df['archetype'] = _archetype_for(fm).values
+app_df = fm[['pitcher', 'season']].copy().rename(columns={'pitcher': 'pitcher_id'})
+app_df['archetype'] = _archetype_for(fm).values
 for col in ['injury_prob_30d', 'expected_days_lost', 'hazard_rate']:
-    risk_df[col] = components_raw[col].values
+    app_df[col] = components_raw[col].values
+
+# Aggregate per-appearance model outputs to pitcher-season level before
+# blending and normalizing — mean=100 must hold at pitcher-season grain.
+risk_df = (
+    app_df.groupby(['pitcher_id', 'season', 'archetype'], observed=True)
+    [['injury_prob_30d', 'expected_days_lost', 'hazard_rate']]
+    .mean()
+    .reset_index()
+)
 
 risk_df = compute_raw_risk_score(risk_df, weights=weights_used)
 
@@ -234,9 +243,9 @@ for (season, archetype), group in risk_df.groupby(['season', 'archetype'], obser
 risk_df['injury_risk_plus'] = irp
 risk_df = compute_risk_percentile(risk_df)
 
-print(f'Computed Injury Risk+ for {len(risk_df):,} pitcher-appearances across {len(seasons)} seasons.')
+print(f'Computed Injury Risk+ for {len(risk_df):,} pitcher-seasons across {len(seasons)} seasons.')
 print()
-print('Sanity check — mean Injury Risk+ should be ~100 within every season x archetype group:')
+print('Sanity check — mean Injury Risk+ should be exactly 100 within every season x archetype group:')
 display(risk_df.groupby(['season', 'archetype'], observed=True)['injury_risk_plus'].agg(['mean', 'std', 'count']).round(1))\
 """
 
@@ -343,15 +352,16 @@ C9_MD = """\
   interpretability over marginal fit), but report the optimized values for
   future design review.
 * **Score construction:** section 4 confirms the normalization step achieves
-  its core design goal — mean Injury Risk+ ≈ 100 within every season ×
-  archetype group, making scores comparable across eras and roles.
+  its core design goal — mean Injury Risk+ = 100 (exactly) within every
+  season × archetype group, making scores comparable across eras and roles.
 * **Face validity:** sections 5–6 surface the highest-risk pitchers and check
   that scores are reasonably stable year-over-year, consistent with injury
   risk being driven by durable factors rather than noise.
 * **Deliverables:** the full scored table
-  (`data/processed/injury_risk_plus_scores.parquet`), normalization
-  reference, blend-weight comparison, and per-season leaderboards are saved
-  to `reports/tables/` for downstream consumption.
+  (`data/processed/injury_risk_plus_scores.parquet`, one row per
+  pitcher-season), normalization reference, blend-weight comparison, and
+  per-season leaderboards are saved to `reports/tables/` for downstream
+  consumption.
 
 This completes the modeling pipeline through Notebook 9, per
 `claude_instructions.md`.\
@@ -362,7 +372,7 @@ provenance = {
     'notebook': '09_risk_score_construction',
     'run_at': datetime.now(timezone.utc).isoformat(),
     'seasons_used': seasons,
-    'n_pitcher_appearances_scored': int(len(risk_df)),
+    'n_pitcher_seasons_scored': int(len(risk_df)),
     'multitask_architecture': best_architecture,
     'survival_model': best_survival_name,
     'calibration_season': int(calib_season),

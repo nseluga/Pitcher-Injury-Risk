@@ -1,6 +1,6 @@
 # Project Status — Pitcher Injury Risk+
 
-Last updated: 2026-06-16
+Last updated: 2026-06-17
 
 ---
 
@@ -9,28 +9,31 @@ Last updated: 2026-06-16
 **Phase 1 — Implementation: COMPLETE**  
 All 13 notebooks implemented, executed, and verified end-to-end on the full 2015–2024 dataset.
 
-**Phase 2 — Baseball Research Critique & Improvement: IN PROGRESS**  
-The autonomous loop now reads each modeling notebook, critiques feature engineering and modeling decisions against the published baseball injury research literature, applies targeted improvements, reruns the notebook, and verifies it still passes. See `docs/model_critique_log.md` for all findings and changes.
+**Phase 2 — Baseball Research Critique & Improvement: COMPLETE**  
+All modeling notebooks 05–12 critiqued against published baseball injury literature. Improvements applied, re-run, and verified. Full record in `docs/model_critique_log.md`. All critique progress entries show `"status": "done"` in `.scratch/critique_progress.json`.
+
+**Phase 3 — Interpretation of Findings: IN PROGRESS**  
+The pipeline is stable and research-grounded. The current task is to synthesize what the models found into clear, defensible conclusions. Output target: `docs/findings_summary.md`. See `claude_instructions.md` for the full Phase 3 protocol.
 
 ---
 
 ## Pipeline Overview
 
-| # | Notebook | Status | Phase 1 | Phase 2 Critique |
-|---|----------|--------|---------|-----------------|
-| 01 | `01_data_collection.ipynb` | ✅ Complete (full) | ✅ | — |
-| 02 | `02_injury_database_construction.ipynb` | ✅ Complete (full) | ✅ | — |
-| 03 | `03_data_cleaning.ipynb` | ✅ Complete (full) | ✅ | — |
-| 04 | `04_eda.ipynb` | ✅ Complete (full) | ✅ | — |
-| 05 | `05_feature_engineering.ipynb` | ✅ Complete (full) | ✅ | 🔲 Pending |
-| 06 | `06_baseline_models.ipynb` | ✅ Complete (full) | ✅ | 🔲 Pending |
-| 07 | `07_survival_models.ipynb` | ✅ Complete (full) | ✅ | 🔲 Pending |
-| 08 | `08_multitask_models.ipynb` | ✅ Complete (full) | ✅ | 🔲 Pending |
-| 09 | `09_risk_score_construction.ipynb` | ✅ Complete (full) | ✅ | 🔲 Pending |
-| 10 | `10_model_interpretability.ipynb` | ✅ Complete (full) | ✅ | 🔲 Pending |
-| 11 | `11_baseball_specific_insights.ipynb` | ✅ Complete (full) | ✅ | 🔲 Pending |
-| 12 | `12_usage_strategy_simulation.ipynb` | ✅ Complete (full) | ✅ | 🔲 Pending |
-| 13 | `13_dashboard.ipynb` | ✅ Complete (full) | ✅ | — |
+| # | Notebook | Phase 1 | Phase 2 Critique |
+|---|----------|---------|-----------------|
+| 01 | `01_data_collection.ipynb` | ✅ | — |
+| 02 | `02_injury_database_construction.ipynb` | ✅ | — |
+| 03 | `03_data_cleaning.ipynb` | ✅ | — |
+| 04 | `04_eda.ipynb` | ✅ | — |
+| 05 | `05_feature_engineering.ipynb` | ✅ | ✅ Done |
+| 06 | `06_baseline_models.ipynb` | ✅ | ✅ Done |
+| 07 | `07_survival_models.ipynb` | ✅ | ✅ Done |
+| 08 | `08_multitask_models.ipynb` | ✅ | ✅ Done |
+| 09 | `09_risk_score_construction.ipynb` | ✅ | ✅ Done |
+| 10 | `10_model_interpretability.ipynb` | ✅ | ✅ Done |
+| 11 | `11_baseball_specific_insights.ipynb` | ✅ | ✅ Done |
+| 12 | `12_usage_strategy_simulation.ipynb` | ✅ | ✅ Done |
+| 13 | `13_dashboard.ipynb` | ✅ | — |
 
 **Legend:**
 - ✅ Complete (full) — implemented, executed on full 2015–2024 data, verified
@@ -86,12 +89,14 @@ All artifacts from notebooks 01–13 are on disk. Key statistics from the full d
 
 ---
 
-## Phase 2 Immediate Next Steps
+## Phase 3 Immediate Next Steps
 
-1. Run `./run_project.sh` — it will detect Phase 1 complete and enter the critique loop automatically.
-2. The loop reads each modeling notebook (05–12), researches relevant baseball injury literature via web search, critiques the modeling decisions, applies specific improvements, reruns, and verifies.
-3. Critique log is appended to `docs/model_critique_log.md` after each notebook.
-4. Each notebook that survives critique and improvement gets committed with a message like `NB06 critique: improved class balance + leakage guard`.
+1. Read the key output artifacts: `reports/tables/shap_global_importance.csv`, `reports/tables/baseball_specific_insights_summary.csv`, `reports/tables/injury_risk_plus_leaderboard.csv`, and the per-year top-25 tables.
+2. Work through the six interpretation targets in order (top predictors → score distribution → historical leaderboards → archetype differences → simulation insights → limitations).
+3. Write findings to `docs/findings_summary.md`, one section at a time.
+4. Commit after each section with `git commit -m "Phase 3: [section] interpretation complete"`.
+
+See `claude_instructions.md` for the full Phase 3 protocol and quality bar.
 
 ---
 
