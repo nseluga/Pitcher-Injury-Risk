@@ -27,9 +27,11 @@ from sklearn.impute import SimpleImputer
 from src.models.baseline_models import _infer_feature_cols
 
 DEFAULT_HORIZON_DAYS = 90
-_MAX_COX_ROWS = 12_000   # Cox PH log-partial-likelihood is O(n*D*p); cap to keep fit <5 min on a laptop
-_MAX_RSF_ROWS = 12_000   # RSF with n_jobs=-1 is fast at 12K; larger sizes caused 2-hr timeouts
-_MAX_COX_FEATURES = 20   # feature pre-selection cap for Cox PH (reduces Hessian dimension)
+_MAX_COX_ROWS = 45_000   # Must exceed event count (~18K) so _subsample keeps censored rows alongside events.
+                         # At 45K: ~18K events + ~27K censored (40% event rate). Cox with 20 features scales OK.
+_MAX_RSF_ROWS = 35_000   # Same reasoning: previously 12K < 18K events → 0 censored in training (broken).
+_MAX_COX_FEATURES = 30   # feature pre-selection cap for Cox PH; 30 captures both injury-history
+                         # (prior_il_total is strongest predictor) and key workload features.
 
 
 def _subsample(
@@ -84,10 +86,14 @@ def _select_top_features(
     return selected
 
 
+ARM_INJURY_TYPES = ["elbow", "shoulder", "forearm"]
+
+
 def prepare_survival_dataset(
     master_df: pd.DataFrame,
     feature_cols: list[str] | None = None,
     test_seasons: list[int] | None = None,
+    event_injury_types: list[str] | None = None,
 ) -> tuple:
     """Prepare the dataset for survival analysis.
 
@@ -103,6 +109,10 @@ def prepare_survival_dataset(
         master_df: Master modeling DataFrame with injury label columns.
         feature_cols: Feature columns to include.
         test_seasons: Seasons to hold out for evaluation.
+        event_injury_types: If provided, only count injuries of these types as events.
+            Non-matching injuries within the horizon are treated as censored (cause-specific
+            survival analysis). Pass ARM_INJURY_TYPES to focus on arm/shoulder/elbow injuries
+            and remove noise from oblique strains, hamstrings, etc.
 
     Returns:
         Tuple of (X_train, X_test, T_train, T_test, E_train, E_test) where
@@ -114,6 +124,11 @@ def prepare_survival_dataset(
     df = master_df.copy()
 
     has_event = df["days_to_next_injury"].notna() & (df["days_to_next_injury"] <= DEFAULT_HORIZON_DAYS)
+
+    if event_injury_types is not None and "next_injury_type" in df.columns:
+        arm_mask = df["next_injury_type"].isin(event_injury_types)
+        has_event = has_event & arm_mask
+
     duration = df["days_to_next_injury"].where(has_event, DEFAULT_HORIZON_DAYS)
     duration = duration.clip(lower=1)  # lifelines/scikit-survival require strictly positive durations
 
@@ -164,6 +179,7 @@ def train_cox_ph(
     E_train: pd.Series,
     max_train_rows: int = _MAX_COX_ROWS,
     n_features: int = _MAX_COX_FEATURES,
+    strata: list[str] | None = None,
 ) -> object:
     """Train a Cox Proportional Hazards model using lifelines.
 
@@ -176,6 +192,11 @@ def train_cox_ph(
         n_features: Pre-select top-n features by event correlation before
             fitting. Reduces Hessian dimension and speeds Newton-Raphson
             from hours to seconds on a laptop.
+        strata: Column(s) to stratify the baseline hazard on. Each unique
+            combination of strata values gets its own baseline hazard function,
+            relaxing the proportional hazards assumption for those columns.
+            Strata columns are included in the fit DataFrame but not estimated
+            as regression coefficients.
 
     Returns:
         Fitted lifelines CoxPHFitter object. The imputer used to fill missing
@@ -190,18 +211,25 @@ def train_cox_ph(
     X_imp = _drop_zero_variance(X_imp)
 
     if n_features and len(X_imp.columns) > n_features:
+        strata_set = set(strata or [])
         selected = _select_top_features(X_imp, E_train, n=n_features)
+        # Always include strata columns even if they fall outside the top-n
+        for col in strata_set:
+            if col not in selected and col in X_imp.columns:
+                selected.append(col)
         X_imp = X_imp[selected]
-        print(f"  [feature select] {len(X_train.columns)} → {len(selected)} features for Cox PH")
+        print(f"  [feature select] {len(X_train.columns)} → {len(X_imp.columns)} features for Cox PH"
+              + (f" (strata={strata})" if strata else ""))
 
     fit_df = X_imp.copy()
     fit_df["_duration"] = T_train.values
     fit_df["_event"] = E_train.values
 
     model = CoxPHFitter(penalizer=0.1)
-    model.fit(fit_df, duration_col="_duration", event_col="_event")
+    model.fit(fit_df, duration_col="_duration", event_col="_event", strata=strata)
     model._imputer_ = imputer
     model._feature_cols_ = list(X_imp.columns)
+    model._strata_ = strata
     # Stash a copy of the fit DataFrame so check_ph_assumption() can run
     # Schoenfeld residual tests without re-running preprocessing.
     model._fit_df_ = fit_df.copy()
@@ -339,6 +367,68 @@ def train_random_survival_forest(
     return model
 
 
+def train_gradient_boosted_survival(
+    X_train: pd.DataFrame,
+    T_train: pd.Series,
+    E_train: pd.Series,
+    max_train_rows: int = _MAX_RSF_ROWS,
+    n_estimators: int = 100,
+    learning_rate: float = 0.1,
+    max_depth: int = 2,
+    min_samples_leaf: int = 20,
+    subsample: float = 0.8,
+) -> object:
+    """Train a Gradient Boosted Survival Analysis model using scikit-survival.
+
+    GradientBoostingSurvivalAnalysis uses componentwise gradient boosting with
+    Cox partial likelihood as the loss. Unlike Cox PH, it captures nonlinear
+    relationships and feature interactions without requiring the proportional
+    hazards assumption at prediction time. Uses all available features — no
+    pre-selection needed since boosting handles high-dimensional inputs naturally.
+
+    Args:
+        X_train: Training feature matrix.
+        T_train: Duration series.
+        E_train: Event indicator series.
+        max_train_rows: Subsample cap (same default as RSF for comparable compute).
+        n_estimators: Number of boosting stages.
+        learning_rate: Shrinkage factor applied to each tree.
+        max_depth: Maximum depth of individual regression estimators.
+        min_samples_leaf: Minimum samples required at a leaf node.
+        subsample: Fraction of samples used per base learner (< 1.0 enables
+            Stochastic Gradient Boosting — reduces variance, improves
+            generalization). Friedman (2002) recommends 0.5–0.8 for tabular data.
+
+    Returns:
+        Fitted GradientBoostingSurvivalAnalysis object with `_imputer_` and
+        `_feature_cols_` attached for prediction replay.
+    """
+    from sksurv.ensemble import GradientBoostingSurvivalAnalysis
+
+    X_train, T_train, E_train = _subsample(X_train, T_train, E_train, max_train_rows)
+
+    X_imp, imputer = _impute(X_train)
+    X_imp = _drop_zero_variance(X_imp)
+
+    y = np.array(
+        [(bool(e), t) for e, t in zip(E_train.values, T_train.values)],
+        dtype=[("event", bool), ("time", float)],
+    )
+
+    model = GradientBoostingSurvivalAnalysis(
+        n_estimators=n_estimators,
+        learning_rate=learning_rate,
+        max_depth=max_depth,
+        min_samples_leaf=min_samples_leaf,
+        subsample=subsample,
+        random_state=42,
+    )
+    model.fit(X_imp, y)
+    model._imputer_ = imputer
+    model._feature_cols_ = list(X_imp.columns)
+    return model
+
+
 def _prepare_X_for_predict(model: object, X: pd.DataFrame) -> pd.DataFrame:
     """Replay the imputation/column-selection used at training time."""
     imputer = getattr(model, "_imputer_", None)
@@ -371,7 +461,8 @@ def predict_survival_function(
     X_imp = _prepare_X_for_predict(model, X)
 
     type_name = type(model).__name__
-    if type_name == "RandomSurvivalForest":
+    if type_name in ("RandomSurvivalForest", "GradientBoostingSurvivalAnalysis"):
+        # sksurv step-functions: each element is callable at any time point.
         surv_funcs = model.predict_survival_function(X_imp)
         data = {f"S({t})": [float(fn(t)) for fn in surv_funcs] for t in time_points}
     else:
@@ -408,8 +499,10 @@ def compute_concordance_index(
     X_imp = _prepare_X_for_predict(model, X_test)
     type_name = type(model).__name__
 
-    if type_name == "RandomSurvivalForest":
-        risk_scores = model.predict(X_imp)  # higher = higher risk
+    # sksurv models (RSF, GBSA): predict() returns cumulative hazard — higher = higher risk.
+    # Negate so that concordance_index (which expects lower score = shorter survival) aligns.
+    if type_name in ("RandomSurvivalForest", "GradientBoostingSurvivalAnalysis"):
+        risk_scores = model.predict(X_imp)
         return float(concordance_index(T_test, -risk_scores, E_test))
 
     # lifelines models expose partial_hazard / median survival time as a
