@@ -11,6 +11,52 @@ Baseline: RF temporal CV mean = 0.148.
 
 ---
 
+## 2026-06-20 Round S-002 — GBSA Double-Stochastic (max_features Column Subsampling)
+
+### Hypothesis
+Row subsampling (subsample=0.8) improved C-index in S-001 (+0.0032). Adding column subsampling
+(max_features='sqrt') creates "double stochastic" boosting: each tree uses a random subset of
+both rows AND features. Chen et al. (2013) showed feature diversity reduces co-adaptation
+between trees. Our 82 workload/velocity features have high collinearity, making them a prime
+candidate for column subsampling. Also tested n_estimators=200 — stochastic boosting tolerates
+more stages since per-stage variance is already reduced.
+
+### Implementation
+- `src/models/survival_models.py`: Added `max_features` parameter to `train_gradient_boosted_survival()`.
+- `notebooks/07_survival_models.ipynb` (cell 5): Initial GBSA training uses `max_features='sqrt'` for evaluation.
+- `notebooks/07_survival_models.ipynb` (tuning cell): Expanded GBSA grid from 6 to 6 FAST configs testing
+  max_features ∈ {None, 'sqrt', 0.5} × n_estimators ∈ {100, 200}.
+
+### Results
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| C-index (test, best tuned model) | 0.5591 | 0.5591 | 0.0000 |
+| IBS (best model) | 0.0734 | 0.0730 | -0.0004 (↓ = better, initial model) |
+| Best model | GBSA (sub=0.8, max_feat=None, n=100) | GBSA (sub=0.8, max_feat=None, n=100) | unchanged |
+
+GBSA tuning results by max_features / n_estimators (TEST_MODE, 2022–2024):
+- n=100, lr=0.1, sub=0.8, max_features=None: **C=0.5591** ← best (same as S-001)
+- n=100, lr=0.1, sub=0.8, max_features='sqrt': C=0.5542 (-0.0049)
+- n=100, lr=0.1, sub=0.8, max_features=0.5: C=0.5462 (-0.0129)
+- n=200, lr=0.1, sub=0.8, max_features=None: C=0.5540 (-0.0051)
+- n=200, lr=0.1, sub=0.8, max_features='sqrt': C=0.5501 (-0.0090)
+- n=200, lr=0.05, sub=0.8, max_features='sqrt': C=0.5583 (-0.0008)
+
+Column subsampling (any value) consistently lower than max_features=None. More estimators (n=200)
+also lower than n=100. The dataset has 82 features with high collinearity — paradoxically, column
+subsampling forces each tree to choose among correlated features rather than the most informative,
+reducing the signal captured per tree. The optimal strategy is row subsampling only (subsample=0.8)
+without column subsampling.
+
+Full-run results (all seasons, 2015–2024): pending — notebook running.
+
+### Verdict
+**Null result.** Column subsampling and n_estimators=200 do not improve C-index. Best config
+confirmed as subsample=0.8, max_features=None, n_estimators=100. `max_features` parameter added
+to function signature for future callers; default reverted to None. `consecutive_non_improvements` → 2.
+
+---
+
 ## 2026-06-20 Round S-001 — Stochastic GBSA via subsample Parameter
 
 ### Hypothesis

@@ -3,9 +3,9 @@
     "status": "in_progress",
     "baseline_c_index": 0.514,
     "best_c_index": 0.5591,
-    "consecutive_non_improvements": 1,
-    "rounds_completed": 1,
-    "notes": "Phase 3A survival model improvement (NB07). True baseline 0.514 (Cox PH, all-injury). Pre-tracking NB07 improvements (arm-only event, stratified Cox, elastic-net, GBSA addition) achieved 0.5559 best C-index as of 2026-06-19. Round S-001 established this as the formal starting point and added stochastic GBSA (subsample=0.8) achieving 0.5591 — delta +0.0032 < 0.005 → consecutive_non_improvements=1."
+    "consecutive_non_improvements": 2,
+    "rounds_completed": 2,
+    "notes": "Phase 3A survival model improvement (NB07). True baseline 0.514 (Cox PH, all-injury). Pre-tracking NB07 improvements (arm-only event, stratified Cox, elastic-net, GBSA addition) achieved 0.5559 best C-index as of 2026-06-19. Round S-001 established this as the formal starting point and added stochastic GBSA (subsample=0.8) achieving 0.5591 — delta +0.0032 < 0.005 → consecutive_non_improvements=1. Round S-002 tested GBSA column subsampling (max_features='sqrt') and n_estimators=200: both hurt C-index. Best config confirmed as max_features=None, n=100, subsample=0.8. consecutive_non_improvements=2. Full-run results pending."
   },
   "round_S001": {
     "status": "done",
@@ -19,5 +19,25 @@
     "notebooks_changed": ["07"],
     "best_config": {"model": "gbsa", "n_estimators": 100, "learning_rate": 0.1, "max_depth": 2, "min_samples_leaf": 20, "subsample": 0.8},
     "verdict": "kept — C-index +0.0032, GBSA now best model; delta < 0.005 threshold so consecutive_non_improvements incremented"
+  },
+  "round_S002": {
+    "status": "done",
+    "category": "model_hyperparameter",
+    "description": "GBSA double-stochastic: column subsampling (max_features='sqrt') + n_estimators=200",
+    "c_index_before": 0.5591,
+    "c_index_after": 0.5591,
+    "delta": 0.0,
+    "ibs_before": 0.0734,
+    "ibs_after": 0.0730,
+    "notebooks_changed": ["07"],
+    "tuning_results_test_mode": [
+      {"max_features": null, "n_estimators": 100, "c_index": 0.5591},
+      {"max_features": "sqrt", "n_estimators": 100, "c_index": 0.5542},
+      {"max_features": 0.5, "n_estimators": 100, "c_index": 0.5462},
+      {"max_features": null, "n_estimators": 200, "c_index": 0.5540},
+      {"max_features": "sqrt", "n_estimators": 200, "c_index": 0.5501},
+      {"max_features": "sqrt", "n_estimators": 200, "learning_rate": 0.05, "c_index": 0.5583}
+    ],
+    "verdict": "null result — column subsampling consistently hurts C-index on this dataset; max_features=None confirmed optimal; default reverted; consecutive_non_improvements=2. Full-run results pending."
   }
 }

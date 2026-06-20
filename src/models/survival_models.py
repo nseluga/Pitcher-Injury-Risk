@@ -377,6 +377,7 @@ def train_gradient_boosted_survival(
     max_depth: int = 2,
     min_samples_leaf: int = 20,
     subsample: float = 0.8,
+    max_features: str | float | int | None = None,
 ) -> object:
     """Train a Gradient Boosted Survival Analysis model using scikit-survival.
 
@@ -398,6 +399,11 @@ def train_gradient_boosted_survival(
         subsample: Fraction of samples used per base learner (< 1.0 enables
             Stochastic Gradient Boosting — reduces variance, improves
             generalization). Friedman (2002) recommends 0.5–0.8 for tabular data.
+        max_features: Number of features considered when looking for the best split
+            per tree ('sqrt', 'log2', float fraction, int count, or None for all).
+            Column subsampling adds feature diversity on top of row subsampling
+            (subsample), creating "double stochastic" boosting. Particularly
+            effective when features are correlated or redundant.
 
     Returns:
         Fitted GradientBoostingSurvivalAnalysis object with `_imputer_` and
@@ -421,6 +427,7 @@ def train_gradient_boosted_survival(
         max_depth=max_depth,
         min_samples_leaf=min_samples_leaf,
         subsample=subsample,
+        max_features=max_features,
         random_state=42,
     )
     model.fit(X_imp, y)

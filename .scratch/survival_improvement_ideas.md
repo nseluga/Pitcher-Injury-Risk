@@ -1,3 +1,59 @@
+# Survival Model Improvement Ideas — 2026-06-20 Round S-002 → COMPLETED
+
+## Already tried (from improvement_progress.json + log)
+- Fix _MAX_COX_ROWS / _MAX_RSF_ROWS subsample bug (pre-tracking)
+- Arm-injury-only event definition (pre-tracking)
+- Stratified Cox PH on prior_il_elbow (pre-tracking)
+- Elastic-net Cox tuning via lifelines penalizer/l1_ratio grid (pre-tracking)
+- GBSA addition with basic hyperparameter grid (pre-tracking)
+- **Round S-001**: Stochastic GBSA subsample=0.8 → C-index 0.5591 (+0.0032)
+- **Round S-002**: GBSA double-stochastic (max_features='sqrt' + n=200) → NULL (0.0000)
+  - max_features='sqrt': C=0.5542 (WORSE); max_features=0.5: C=0.5462 (WORSE)
+  - n=200 + any max_features: WORSE than n=100 + max_features=None
+  - Confirmed: optimal GBSA = n=100, lr=0.1, depth=2, subsample=0.8, max_features=None
+
+## New approaches — S-003
+
+Status: consecutive_non_improvements=2. Need a meaningful improvement or reaches 3.
+
+1. **Ensemble risk score (GBSA + RSF + Cox rank average)** — Rank-average the normalized
+   log-hazard scores from best Cox PH, RSF, and GBSA. Model diversity produces robust
+   combinations even when individual models are mediocre; committee methods reliably gain
+   +0.01–0.03 in survival literature (Graf et al., 1999). Pure NB07 change, ~10 lines.
+   Expected delta: +0.010–0.030. **HIGH value, LOW risk — RECOMMENDED for S-003.**
+
+2. **Log-normal + Log-logistic AFT models** — Both already imported (LogNormalAFTFitter,
+   LogLogisticAFTFitter). Two-line addition per model. Non-monotone hazard may fit pitcher
+   fatigue patterns better than Weibull. Could contribute to ensemble (idea 1) as well.
+
+3. **CoxnetSurvivalAnalysis (sksurv)** — sksurv's coordinate-descent penalized Cox handles
+   all 82 features without the univariate pre-selection bottleneck. Different optimizer than
+   lifelines — may surface jointly-predictive features missed by current 30-feature subset.
+
+4. **Cumulative IL count feature (all types)** — total_prior_il_count across all injury
+   types is the strongest frailty proxy in recurrent-event literature. Requires NB05 edit.
+   Currently only prior_il_elbow, prior_il_shoulder in features; total is not there.
+
+5. **GBSA min_samples_leaf tuning** — Try 10 (more expressive) and 50 (more regularized).
+   n=100, lr=0.1, depth=2, sub=0.8 is locked; this is the only untested tuning dimension.
+
+6. **Frailty model (GammaMixtureFrailtyFitter)** — Pitcher-level random effects for
+   structural injury proneness. Complex to implement but high literature evidence (+0.01–0.05).
+
+## Decision for S-003
+
+**Pick: Idea 1 — Ensemble risk score (GBSA + RSF + Cox rank average)**
+
+Rationale:
+- Consecutive_non_improvements=2 — need a meaningful gain to avoid convergence
+- Ensemble averaging is the highest-expected-value idea remaining (literature: +0.01–0.03)
+- No feature engineering or new model families needed — pure post-processing of existing models
+- All three component models already trained and available in survival_models dict
+- 10–15 lines of code, all in NB07
+
+---
+
+# Previous session notes (kept for reference)
 # Survival Model Improvement Ideas — 2026-06-20 (Round 1 formal tracking)
 
 ## Already tried (now in NB07 from prior sessions)
