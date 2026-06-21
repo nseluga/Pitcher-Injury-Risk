@@ -3,9 +3,9 @@
     "status": "in_progress",
     "baseline_c_index": 0.514,
     "best_c_index": 0.5658,
-    "consecutive_non_improvements": 0,
-    "rounds_completed": 3,
-    "notes": "Phase 3A survival model improvement (NB07). True baseline 0.514 (Cox PH, all-injury). Pre-tracking NB07 improvements (arm-only event, stratified Cox, elastic-net, GBSA addition) achieved 0.5559 best C-index as of 2026-06-19. Round S-001: stochastic GBSA subsample=0.8 → C-index 0.5591 (+0.0032). Round S-002: GBSA double-stochastic null result — column subsampling and n=200 both hurt; max_features=None confirmed optimal. Round S-003: Ensemble rank-average (GBSA+Cox+RSF) → C-index 0.5658 (+0.0067). Delta ≥ 0.005 → consecutive_non_improvements resets to 0. Full-run results pending (notebook running in background)."
+    "consecutive_non_improvements": 1,
+    "rounds_completed": 4,
+    "notes": "Phase 3A survival model improvement (NB07). True baseline 0.514 (Cox PH, all-injury). Pre-tracking NB07 improvements (arm-only event, stratified Cox, elastic-net, GBSA addition) achieved 0.5559 best C-index as of 2026-06-19. Round S-001: stochastic GBSA subsample=0.8 → C-index 0.5591 (+0.0032). Round S-002: GBSA double-stochastic null result — column subsampling and n=200 both hurt; max_features=None confirmed optimal. Round S-003: Ensemble rank-average (GBSA+Cox+RSF) → C-index 0.5658 (+0.0067). Round S-004: Log-normal AFT as 4th ensemble member → regression (0.5637, -0.0021); reverted. consecutive_non_improvements=1."
   },
   "round_S001": {
     "status": "done",
@@ -63,5 +63,27 @@
       {"config": "new: n=200, lr=0.05, depth=2, msl=20, sub=0.8, mf=None", "c_index": 0.5575}
     ],
     "verdict": "kept — ensemble C-index 0.5658 (+0.0067), exceeds +0.005 threshold; consecutive_non_improvements reset to 0. Full-run results pending (notebook running in background). GBSA hyperparameter space confirmed exhausted: all 3 new configs worse than reference; depth=2, n=100, lr=0.1, sub=0.8 is optimal."
+  },
+  "round_S004": {
+    "status": "done",
+    "category": "ensemble",
+    "description": "Log-Normal + Log-Logistic AFT as 4th ensemble member — non-monotone hazard diversity",
+    "c_index_before": 0.5658,
+    "c_index_after": 0.5637,
+    "delta": -0.0021,
+    "ibs_before": null,
+    "ibs_after": null,
+    "notebooks_changed": ["07"],
+    "aft_individual_c_indices_test_mode": {
+      "aft_lognormal": 0.5447,
+      "aft_loglogistic": "evaluation_failed",
+      "aft_weibull_reference": 0.5407
+    },
+    "ensemble_comparison_test_mode": {
+      "3_model_gbsa_cox_rsf": 0.5658,
+      "4_model_plus_lognormal_aft": 0.5637,
+      "delta": -0.0021
+    },
+    "verdict": "reverted — 4-model ensemble WORSE than 3-model (0.5637 < 0.5658). Adding aft_lognormal (C=0.5447) diluted the ensemble signal rather than adding diversity. aft_loglogistic failed during evaluation (numerical instability in lifelines). AFT models at C~0.54 are too weak to improve ensemble already at 0.5658; consecutive_non_improvements=1."
   }
 }

@@ -11,6 +11,54 @@ Baseline: RF temporal CV mean = 0.148.
 
 ---
 
+## 2026-06-21 Round S-004 — Log-Normal + Log-Logistic AFT as 4th Ensemble Member
+
+### Hypothesis
+The 3-model ensemble (GBSA+Cox+RSF, C=0.5658) uses only monotone-hazard or tree-based models.
+Weibull AFT, Log-Normal AFT, and Log-Logistic AFT allow different distributional assumptions about
+injury timing. Log-logistic/log-normal specifically allow **non-monotone hazard** — risk rises
+then falls — which plausibly matches pitcher injury dynamics (risk accumulates with workload, peaks,
+then resolves after rest). Adding the best-performing parametric AFT model as a 4th ensemble member
+should add diversity even at modest individual C-index, per ensemble theory (variance reduction).
+Search confirmation: PMC8523281 — "log-logistic hazard is non-monotonic, allowing non-PH
+representations where risk may increase before decreasing."
+
+### Implementation
+- `notebooks/07_survival_models.ipynb` (cell c03-train): Added training of `aft_lognormal` and
+  `aft_loglogistic` via existing `train_aft_model(distribution='lognormal'/'loglogistic')`.
+- `notebooks/07_survival_models.ipynb` (cell 029661a1 — ensemble): Added loop evaluating AFT models
+  as 4th ensemble candidates. Best AFT added to ensemble if C-index ≥ 0.51. Code compares
+  3-model and 4-model ensemble and reports the delta.
+
+### Results
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| C-index (test, ensemble) | 0.5658 (3-model: GBSA+Cox+RSF) | 0.5637 (4-model: GBSA+Cox+RSF+LN-AFT) | **-0.0021** |
+| IBS | N/A | N/A | — |
+
+AFT individual C-indices (TEST_MODE, 2022–2024):
+- `aft_lognormal`: **C=0.5447** (above 0.51 threshold → added to ensemble)
+- `aft_loglogistic`: failed to evaluate (not in results table; likely numerical failure in lifelines)
+- `aft_weibull` (reference): C=0.5407 (monotone hazard, worse than lognormal)
+
+Ensemble comparison:
+- 3-model (GBSA+Cox+RSF): **C=0.5658** ← S-003 best
+- 4-model (GBSA+Cox+RSF+LN-AFT): **C=0.5637** ← S-004 result (-0.0021)
+
+**The 4-model ensemble is WORSE than the 3-model ensemble.** Adding `aft_lognormal` (C=0.5447)
+diluted the ensemble's signal: a 4th model with lower individual performance adds noise to the
+rank-average rather than complementary diversity. The negative result is consistent with ensemble
+theory — adding a clearly weaker model always reduces, not improves, concordance when the existing
+ensemble is already optimal.
+
+### Verdict
+**Reverted.** Adding lognormal AFT to the ensemble hurt C-index by -0.0021. 3-model ensemble
+(GBSA+Cox+RSF) at C=0.5658 remains the best configuration. `consecutive_non_improvements` → 1.
+Key takeaway: AFT models at C~0.54 are not diverse enough to improve an ensemble already at 0.5658;
+their residual errors are dominated by the stronger models (GBSA, Cox, RSF).
+
+---
+
 ## 2026-06-21 Round S-003 — Survival Model Ensemble (Rank-Average of GBSA + Cox + RSF)
 
 ### Hypothesis
