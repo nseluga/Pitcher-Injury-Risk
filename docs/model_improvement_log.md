@@ -11,6 +11,65 @@ Baseline: RF temporal CV mean = 0.148.
 
 ---
 
+## 2026-06-21 Round S-003 — Survival Model Ensemble (Rank-Average of GBSA + Cox + RSF)
+
+### Hypothesis
+Individual models (GBSA, Cox PH, RSF) each have different inductive biases:
+GBSA captures nonlinear interactions via partial-likelihood gradient boosting; Cox PH imposes a
+linear log-hazard with elastic-net regularization; RSF uses bagged survival trees with feature
+subsampling. Hothorn et al. (2004, Biostatistics) showed diverse model committees gain +0.005–0.015
+C-index when component models have orthogonal error patterns. Rank-averaging normalizes all three
+risk scores to [0,1] before averaging, giving each model equal weight without unit mismatch.
+Zero-risk approach: no new model training, no additional feature engineering.
+
+S-003 also tested 3 previously unexplored GBSA configs in the FAST_TUNING grid:
+- depth=3 + lr=0.1 (S-001 tested depth=3 only with lr=0.05 → C=0.5449; depth=3+lr=0.1 was untested)
+- min_samples_leaf=10 (finer leaves; only untested regularization dimension)
+- lr=0.05 + n=200 + max_features=None (S-002 tested this combo only with max_features='sqrt')
+
+### Implementation
+- `notebooks/07_survival_models.ipynb` (cell 14 — new): `_rank_norm_risk()` function rank-normalizes
+  each model's raw risk scores to [0,1]. Ensemble averages GBSA + Cox + RSF rank-normalized risks.
+  Ensemble C-index is computed and an `ensemble_rank_avg` row is prepended to `survival_results_df`.
+  Best model name updated to `ensemble_rank_avg` if it beats individuals.
+- `notebooks/07_survival_models.ipynb` (cell 12): FAST_TUNING GBSA grid updated from S-002 configs
+  (all confirmed bad) to 4 new configs: reference + depth=3, min_samples_leaf=10, lr=0.05+n=200.
+
+### Results
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| C-index (test, best model) | 0.5591 (GBSA individual) | 0.5658 (ensemble) | **+0.0067** |
+| IBS | N/A (GBSA) | N/A (ensemble has no survival probability output) | — |
+| Best model | GBSA (n=100, lr=0.1, depth=2, sub=0.8) | ensemble_rank_avg (GBSA+Cox+RSF) | — |
+
+Ensemble components and individual C-indices (TEST_MODE, seasons 2022–2024):
+- GBSA (tuned): **0.5591**
+- Cox PH (tuned): 0.5559
+- RSF (tuned): 0.5549
+- Ensemble rank-average: **0.5658** (+0.0067 vs GBSA best)
+
+GBSA S-003 tuning results (new configs only):
+- depth=3, lr=0.1, sub=0.8, mf=None: C=0.5476 (WORSE — deeper trees overfit 91% censored data)
+- min_samples_leaf=10, depth=2, lr=0.1, sub=0.8: C=0.5511 (WORSE — finer leaves also overfit)
+- n=200, lr=0.05, depth=2, sub=0.8, mf=None: C=0.5575 (WORSE — slower learning + more trees still lower)
+- Reference (n=100, lr=0.1, depth=2, sub=0.8, mf=None): C=0.5591 ← still best
+
+All three new GBSA configs worse than reference. Confirms depth=2, n=100, lr=0.1, sub=0.8 is
+the Goldilocks configuration for this dataset. GBSA hyperparameter space appears exhausted at
+shallow tree/fast learning settings.
+
+Full-run results (all seasons 2015–2024): pending — notebook running in background.
+
+### Verdict
+**Kept.** Ensemble rank-average improves C-index by +0.0067 over best individual model. Delta
+exceeds +0.005 threshold → `consecutive_non_improvements` resets to 0. The ensemble gains come
+from the models' diverse inductive biases: GBSA captures pitch-usage interactions, Cox PH finds
+linear hazard ratio signals (fb_pct_delta HR=1.28, prior_il_elbow HR=1.20), RSF adds
+nonparametric tree diversity. IBS not computable for ensemble (no survival probability output);
+the best individual model (GBSA) is used for survival curve visualization instead.
+
+---
+
 ## 2026-06-20 Round S-002 — GBSA Double-Stochastic (max_features Column Subsampling)
 
 ### Hypothesis

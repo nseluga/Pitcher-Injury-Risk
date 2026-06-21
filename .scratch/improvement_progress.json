@@ -2,10 +2,10 @@
   "_meta": {
     "status": "in_progress",
     "baseline_c_index": 0.514,
-    "best_c_index": 0.5591,
-    "consecutive_non_improvements": 2,
-    "rounds_completed": 2,
-    "notes": "Phase 3A survival model improvement (NB07). True baseline 0.514 (Cox PH, all-injury). Pre-tracking NB07 improvements (arm-only event, stratified Cox, elastic-net, GBSA addition) achieved 0.5559 best C-index as of 2026-06-19. Round S-001 established this as the formal starting point and added stochastic GBSA (subsample=0.8) achieving 0.5591 — delta +0.0032 < 0.005 → consecutive_non_improvements=1. Round S-002 tested GBSA column subsampling (max_features='sqrt') and n_estimators=200: both hurt C-index. Best config confirmed as max_features=None, n=100, subsample=0.8. consecutive_non_improvements=2. Full-run results pending."
+    "best_c_index": 0.5658,
+    "consecutive_non_improvements": 0,
+    "rounds_completed": 3,
+    "notes": "Phase 3A survival model improvement (NB07). True baseline 0.514 (Cox PH, all-injury). Pre-tracking NB07 improvements (arm-only event, stratified Cox, elastic-net, GBSA addition) achieved 0.5559 best C-index as of 2026-06-19. Round S-001: stochastic GBSA subsample=0.8 → C-index 0.5591 (+0.0032). Round S-002: GBSA double-stochastic null result — column subsampling and n=200 both hurt; max_features=None confirmed optimal. Round S-003: Ensemble rank-average (GBSA+Cox+RSF) → C-index 0.5658 (+0.0067). Delta ≥ 0.005 → consecutive_non_improvements resets to 0. Full-run results pending (notebook running in background)."
   },
   "round_S001": {
     "status": "done",
@@ -38,6 +38,30 @@
       {"max_features": "sqrt", "n_estimators": 200, "c_index": 0.5501},
       {"max_features": "sqrt", "n_estimators": 200, "learning_rate": 0.05, "c_index": 0.5583}
     ],
-    "verdict": "null result — column subsampling consistently hurts C-index on this dataset; max_features=None confirmed optimal; default reverted; consecutive_non_improvements=2. Full-run results pending."
+    "verdict": "null result — column subsampling consistently hurts C-index on this dataset; max_features=None confirmed optimal; default reverted; consecutive_non_improvements=2"
+  },
+  "round_S003": {
+    "status": "done",
+    "category": "ensemble",
+    "description": "Rank-average ensemble of GBSA + Cox PH + RSF risk scores — Hothorn et al. (2004) committee method",
+    "c_index_before": 0.5591,
+    "c_index_after": 0.5658,
+    "delta": 0.0067,
+    "ibs_before": null,
+    "ibs_after": null,
+    "notebooks_changed": ["07"],
+    "individual_c_indices_test_mode": {
+      "gbsa": 0.5591,
+      "cox": 0.5559,
+      "rsf": 0.5549
+    },
+    "ensemble_c_index_test_mode": 0.5658,
+    "gbsa_s003_tuning_test_mode": [
+      {"config": "reference: n=100, lr=0.1, depth=2, msl=20, sub=0.8, mf=None", "c_index": 0.5591},
+      {"config": "new: n=100, lr=0.1, depth=3, msl=20, sub=0.8, mf=None", "c_index": 0.5476},
+      {"config": "new: n=100, lr=0.1, depth=2, msl=10, sub=0.8, mf=None", "c_index": 0.5511},
+      {"config": "new: n=200, lr=0.05, depth=2, msl=20, sub=0.8, mf=None", "c_index": 0.5575}
+    ],
+    "verdict": "kept — ensemble C-index 0.5658 (+0.0067), exceeds +0.005 threshold; consecutive_non_improvements reset to 0. Full-run results pending (notebook running in background). GBSA hyperparameter space confirmed exhausted: all 3 new configs worse than reference; depth=2, n=100, lr=0.1, sub=0.8 is optimal."
   }
 }

@@ -1,6 +1,41 @@
-# Survival Model Improvement Ideas — 2026-06-20 Round S-002 → COMPLETED
+# Survival Model Improvement Ideas — 2026-06-21 Round S-003 (SESSION 2: CONFIRMING FULL RUN)
 
-## Already tried (from improvement_progress.json + log)
+## Session 2 brainstorm (2026-06-21, continuing from prior session)
+
+S-003 is already implemented: ensemble rank-average (GBSA + Cox + RSF) in cell 14, updated
+GBSA tuning grid in cell 12. TEST_MODE showed 0.5658 (+0.0067 vs best individual 0.5591).
+This session confirms with a full TEST_MODE re-run, then launches the full dataset run.
+
+### Still-untested high-value ideas (for S-004+)
+1. **CoxnetSurvivalAnalysis (sksurv)** — coordinate-descent penalized Cox over all 82 features,
+   elastic-net penalty suppresses zero-signal features. Could find jointly-predictive features
+   current Cox misses. Usable as 4th ensemble member for more diversity. HIGH value.
+2. **Log-logistic AFT as 4th ensemble member** — Different distributional assumption from Cox/RSF/GBSA.
+   One-line addition to AFT training. Could push ensemble past next threshold.
+3. **Log-rank feature selection** — Replace univariate correlation filter with log-rank p-values
+   (lifelines built-in). Log-rank directly tests whether a feature stratifies survival curves.
+4. **Season-phase feature** — Early/mid/late indicator. Pitcher injury hazard varies by season phase.
+5. **Cumulative all-injury IL count** — total_prior_il_count across ALL body parts as frailty proxy.
+   Current features only have arm-specific prior ILs. Strongest frailty proxy in recurrent-event lit.
+6. **GBSA depth=3, lr=0.1, subsample=0.8** — Untested combination (S-001 only tested depth=3 with lr=0.05).
+   Already in GBSA FAST_TUNING grid; will be tested in this S-003 full run.
+7. **min_samples_leaf=10** — More expressive leaves (current=20). Already in S-003 FAST_TUNING grid.
+8. **lr=0.05+n=200+mf=None** — Different from S-002's lr=0.05+n=200+mf='sqrt'. Already in S-003 grid.
+9. **Frailty model (GammaMixtureFrailtyFitter)** — lifelines experimental API, pitcher-level random
+   effects. Highest risk, highest ceiling (+0.01–0.05). Reserve for last resort.
+10. **Time-varying covariate Cox** — Use lifelines' long-format Cox for time-varying acwr_7_28.
+    acwr_7_28 violated PH (Schoenfeld p<0.05); modeling it as time-varying removes the violation.
+
+### Decision for this session: Complete S-003
+- S-003 fully implemented (cell 14 ensemble + cell 12 GBSA grid update)
+- TEST_MODE showed 0.5658 (+0.0067 ≥ +0.005 threshold) — needs full-run confirmation
+- Proceed: TEST_MODE re-run → full run → log → commit
+
+---
+
+# Survival Model Improvement Ideas — 2026-06-21 Round S-003 (FULL RUN EXECUTING THIS SESSION)
+
+## Already tried (from improvement_progress.json)
 - Fix _MAX_COX_ROWS / _MAX_RSF_ROWS subsample bug (pre-tracking)
 - Arm-injury-only event definition (pre-tracking)
 - Stratified Cox PH on prior_il_elbow (pre-tracking)
@@ -9,241 +44,135 @@
 - **Round S-001**: Stochastic GBSA subsample=0.8 → C-index 0.5591 (+0.0032)
 - **Round S-002**: GBSA double-stochastic (max_features='sqrt' + n=200) → NULL (0.0000)
   - max_features='sqrt': C=0.5542 (WORSE); max_features=0.5: C=0.5462 (WORSE)
-  - n=200 + any max_features: WORSE than n=100 + max_features=None
+  - n=200, lr=0.1, mf=None: C=0.5540 (WORSE); n=200, lr=0.05, mf='sqrt': C=0.5583 (WORSE)
   - Confirmed: optimal GBSA = n=100, lr=0.1, depth=2, subsample=0.8, max_features=None
 
-## New approaches — S-003
+## New approaches to consider — S-003
 
-Status: consecutive_non_improvements=2. Need a meaningful improvement or reaches 3.
+Status: consecutive_non_improvements=2. Need meaningful gain (+0.005) or declare convergence.
+Best C-index to beat: 0.5591 (GBSA, subsample=0.8). Need ≥ 0.5641 to avoid convergence.
 
 1. **Ensemble risk score (GBSA + RSF + Cox rank average)** — Rank-average the normalized
-   log-hazard scores from best Cox PH, RSF, and GBSA. Model diversity produces robust
-   combinations even when individual models are mediocre; committee methods reliably gain
-   +0.01–0.03 in survival literature (Graf et al., 1999). Pure NB07 change, ~10 lines.
-   Expected delta: +0.010–0.030. **HIGH value, LOW risk — RECOMMENDED for S-003.**
+   risk scores from best tuned Cox PH (C=0.5559), RSF (C=0.5549), and GBSA (C=0.5591).
+   Diverse model committees reduce prediction variance without new training. Committee
+   methods reliably gain +0.005–0.015 in survival literature (Hothorn et al. 2004 Biostatistics;
+   Graf et al. 1999). All three models already trained; code already in NB07 cells 13-14.
+   **CHOSEN for S-003. HIGH expected value (+0.005–0.015). Zero risk — no model changes.**
 
-2. **Log-normal + Log-logistic AFT models** — Both already imported (LogNormalAFTFitter,
-   LogLogisticAFTFitter). Two-line addition per model. Non-monotone hazard may fit pitcher
-   fatigue patterns better than Weibull. Could contribute to ensemble (idea 1) as well.
+2. **GBSA depth=3, lr=0.1, subsample=0.8** — S-001 grid tested depth=3 only with lr=0.05
+   (C=0.5449). depth=3 + lr=0.1 is UNTESTED — faster learning with slightly more expressive
+   trees may capture first-order interactions (ACWR × pitch load) that depth=2 misses.
+   Adding to GBSA fast-tuning grid for this session (3 new configs alongside reference).
+   **ALSO TESTING THIS SESSION in GBSA tuning grid update.**
 
-3. **CoxnetSurvivalAnalysis (sksurv)** — sksurv's coordinate-descent penalized Cox handles
-   all 82 features without the univariate pre-selection bottleneck. Different optimizer than
-   lifelines — may surface jointly-predictive features missed by current 30-feature subset.
+3. **GBSA min_samples_leaf=10** — More expressive leaves (current=20). Only untested
+   regularization dimension. Could capture rare event patterns. Low risk.
+   **ALSO TESTING THIS SESSION in GBSA tuning grid update.**
 
-4. **Cumulative IL count feature (all types)** — total_prior_il_count across all injury
-   types is the strongest frailty proxy in recurrent-event literature. Requires NB05 edit.
-   Currently only prior_il_elbow, prior_il_shoulder in features; total is not there.
+4. **GBSA lr=0.05, n=200, max_features=None** — The config NOT tested in S-002 (only
+   lr=0.05+n=200+mf='sqrt' was tested there). Slower learning + more trees with no
+   column subsampling. Could find more stable gradient descent path.
+   **ALSO TESTING THIS SESSION in GBSA tuning grid update.**
 
-5. **GBSA min_samples_leaf tuning** — Try 10 (more expressive) and 50 (more regularized).
-   n=100, lr=0.1, depth=2, sub=0.8 is locked; this is the only untested tuning dimension.
+5. **CoxnetSurvivalAnalysis (sksurv)** — sksurv coordinate-descent penalized Cox over all 82
+   features, not top-30. Elastic-net penalty suppresses zero-signal features automatically.
+   Different feature set could surface jointly-predictive features current Cox misses.
+   Medium implementation cost. Reserve for S-004 if S-003 converges.
 
-6. **Frailty model (GammaMixtureFrailtyFitter)** — Pitcher-level random effects for
-   structural injury proneness. Complex to implement but high literature evidence (+0.01–0.05).
+6. **Log-normal + Log-logistic AFT** — Non-monotone hazard distributions may fit pitcher
+   injury timing better than Weibull. One-line additions per model. Could add to ensemble
+   as 4th member for diversity. Reserve for S-004.
+
+7. **Log-rank feature selection for Cox** — Replace corrwith(E) with univariate log-rank
+   p-values for feature selection. Log-rank directly tests whether a feature stratifies
+   survival curves. acwr_7_28 (known signal, PH violation) may score much higher on log-rank
+   than binary correlation. Medium implementation.
+
+8. **Season-phase categorical feature** — Early (games 1-30), mid, late, postseason indicator.
+   Injury hazard likely varies by season phase (spring arm fatigue, September fatigue).
+   Captures within-season baseline hazard variation Cox cannot currently model.
+   Requires NB05 edit — medium cost.
+
+9. **Cumulative all-injury IL count** — total_prior_il_count across ALL body parts as frailty
+   proxy. Current features only have arm-specific prior ILs. Total injury burden is strongest
+   frailty proxy in recurrent-event literature. Requires NB05 + feature_matrix rebuild.
+
+10. **Frailty model (GammaMixtureFrailtyFitter)** — Pitcher-level random effects for structural
+    injury proneness. lifelines experimental API — highest risk, highest potential ceiling
+    (+0.01–0.05). Reserve for last if all other options exhausted.
 
 ## Decision for S-003
 
-**Pick: Idea 1 — Ensemble risk score (GBSA + RSF + Cox rank average)**
+**Primary: Idea 1 — Ensemble risk score (GBSA + RSF + Cox rank average)**
+**Secondary: Ideas 2-4 — 3 new unexplored GBSA configs replacing re-tested S-002 failures**
 
 Rationale:
-- Consecutive_non_improvements=2 — need a meaningful gain to avoid convergence
-- Ensemble averaging is the highest-expected-value idea remaining (literature: +0.01–0.03)
-- No feature engineering or new model families needed — pure post-processing of existing models
-- All three component models already trained and available in survival_models dict
-- 10–15 lines of code, all in NB07
+- consecutive_non_improvements=2 — need meaningful gain to avoid convergence
+- Ensemble averaging is highest-expected-value remaining approach (+0.005–0.015 from literature)
+- Implementation already complete in NB07 cells 13-14 — just needs execution
+- GBSA tuning grid update (ideas 2-4) is cost-free: replaces already-known-bad S-002 configs
+  with new unexplored configs; doesn't change the primary hypothesis
+
+## TEST_MODE result (2026-06-21, before full run)
+- Ensemble C-index: **0.5658** (+0.0067 vs GBSA best individual 0.5591)
+- This EXCEEDS the +0.005 threshold → if confirmed in full run, consecutive_non_improvements resets to 0
+- Individual components: GBSA=0.5591, Cox=0.5559, RSF=0.5549
+- GBSA tuning cell: still has S-002 configs in output (cell not re-run yet); but best config unchanged
+- Full run launching in this session with TEST_MODE=False
+
+## Research notes (2026-06-20)
+
+- Hothorn et al. (2004) Biostatistics: diverse model committees improve concordance +0.005–0.015
+  when component models have different inductive biases (linear vs tree vs boosted)
+- Graf et al. (1999): committee methods gain +0.01–0.03 when models have orthogonal error patterns
+- Key insight: GBSA (nonlinear boosted trees, Cox partial-likelihood loss), Cox PH (L1/L2-regularized
+  linear), RSF (bagged survival trees, max_features='sqrt') have different inductive biases
+- Individual C-indices: GBSA=0.5591, Cox=0.5559, RSF=0.5549 — all similar, diverse architectures
+- Rank normalization (rankdata / n) ensures all three models contribute equally before averaging
+- If ensemble doesn't improve (+0.005 threshold), consecutive_non_improvements → 3 → convergence
 
 ---
 
-# Previous session notes (kept for reference)
-# Survival Model Improvement Ideas — 2026-06-20 (Round 1 formal tracking)
+# S-004 Forward Brainstorm (if S-003 ensemble < +0.005 → convergence; if ≥ +0.005 → use these)
 
-## Already tried (now in NB07 from prior sessions)
-- Fix subsample bug: raised `_MAX_COX_ROWS=45K`, `_MAX_RSF_ROWS=35K`
-- Raised `_MAX_COX_FEATURES` 20→30 to capture injury history + workload
-- Arm-injury-only event definition (elbow/shoulder/forearm IL stints)
-- Stratified Cox PH on `prior_il_elbow` (addresses PH violation p=0.002)
-- Elastic-net penalized Cox (penalizer × l1_ratio grid; best: pen=0.01, l1=0.5)
-- RSF (n_estimators=50–100, max_depth=4–6; best C=0.555)
-- GBSA (n_estimators=100, lr=0.05–0.10, max_depth=2–3, NO subsample; best C=0.553)
-- **Current best C-index: 0.5559** (tuned Cox PH)
+Status heading into S-004: consecutive_non_improvements will be 2 or 3 depending on S-003 result.
 
-## New approaches to consider — 2026-06-20
+1. **GBSA depth=3, lr=0.1, subsample=0.8** — If S-003 GBSA tuning finds depth=3+lr=0.1 is
+   better than depth=2 reference, use as new best model component.
 
-1. **GBSA with `subsample` (stochastic gradient boosting)** — Friedman (2002)
-   showed `subsample=0.5–0.8` reduces variance in boosted trees by 15–30% on
-   out-of-sample data. sksurv's `GradientBoostingSurvivalAnalysis` supports
-   `subsample` directly. Current GBSA tuning never tested this parameter.
-   Expected gain: +0.005–0.020 C-index. **CHOSEN for Round 1 (2026-06-20).**
+2. **CoxnetSurvivalAnalysis (sksurv)** — sksurv coordinate-descent penalized Cox over all 82
+   features, not top-30. Elastic-net penalty suppresses zero-signal features automatically.
+   Different feature set could surface jointly-predictive features current Cox misses.
+   Usable as 4th ensemble member to improve ensemble diversity. Medium implementation, high value.
 
-2. **Log-normal AFT model** — Weibull AFT assumes monotone hazard. Log-normal
-   captures non-monotone hazard (rises then falls), matching early-season
-   arm-fatigue peak. Code already imports `LogNormalAFTFitter`. Low cost.
+3. **Log-logistic AFT as 4th ensemble member** — Different distributional assumption,
+   different inductive bias from Cox/RSF/GBSA. One-line addition to AFT training.
+   Could push 3-model ensemble past +0.005 threshold.
 
-3. **Log-logistic AFT model** — Similar rationale to log-normal but heavier tails.
-   Already imported. One-line addition.
+4. **Log-rank feature selection for Cox** — Replace univariate correlation filter with log-rank
+   p-values (lifelines has built-in). Log-rank directly tests whether a feature stratifies
+   survival curves; acwr_7_28 (known signal, PH violation) may score much higher.
 
-4. **CoxnetSurvivalAnalysis (sksurv)** — sksurv's penalized Cox handles all 82
-   features natively without pre-selection. Avoids univariate correlation filter
-   bottleneck. May surface jointly-predictive features missed by current approach.
+5. **Season-phase feature (early/mid/late)** — Indicator for games 1-30 (spring arm), 31-100
+   (mid), 101+ (late fatigue). Pitcher injury hazard peaks early and late; Cox PH cannot model
+   this without explicit feature. Requires NB05 edit — medium cost, moderate expected gain.
 
-5. **Non-linear Cox feature transforms** — 7 PH violations detected. Adding
-   `log1p(days_since_last_injury)` + `acwr_7_28²` (J-curve) directly addresses
-   the non-linearity. Would benefit Cox; RSF/GBSA already capture non-linearity.
+6. **Cumulative all-injury IL count** — total_prior_il_count across ALL body parts as frailty
+   proxy. Requires NB05 + feature_matrix rebuild — higher cost.
 
-6. **Multi-strata Cox** — Stratify on `prior_il_elbow` (done) AND binned
-   `pitches_90d` quartiles to address second PH violation. Risk: sparse strata.
-
-7. **GBSA with dropout_rate (DART)** — sksurv 0.21+ supports `dropout_rate`
-   parameter (DART algorithm). Prevents individual trees from over-specializing;
-   known to improve C-index on sparse event survival data. Uncertain availability.
-
-8. **Frailty model (pitcher-level random effects)** — lifelines
-   `GammaMixtureFrailtyFitter` captures unobserved pitcher-level heterogeneity.
-   Clinical recurrent-event literature: +0.01–0.05 C-index. Complex to implement.
-
-9. **Ensemble risk score** — Rank-average log-hazard from Cox + RSF + GBSA.
-   Model diversity without new features. Literature: +0.01–0.03 C-index.
-
-10. **Extended GBSA n_estimators 300–500 with lr=0.01** — Current tuning capped
-    at n=100. More trees with smaller lr often produce better survival models.
+7. **Frailty model (GammaMixtureFrailtyFitter)** — Pitcher-level random effects for structural
+   proneness. lifelines experimental API — highest risk, highest potential ceiling (+0.01–0.05).
+   Reserve for last if all other options exhausted.
 
 ---
 
-# Previous session notes (2026-06-19 updated 2026-06-19 Round 1)
+# Previous brainstorm sessions (archived for reference)
 
----
+## 2026-06-20 Round S-002 brainstorm (archived)
+- Chosen: GBSA double-stochastic (max_features='sqrt' + n=200) — NULL RESULT
+- max_features='sqrt' consistently hurt C-index (0.5542 < 0.5591)
+- Confirmed: max_features=None optimal for this 82-feature dataset
 
-# Session 2026-06-19 — Round 1 (formal tracking starts here)
-
-## Already tried (now implemented in NB07)
-- Fix events-only subsample bug: raised `_MAX_COX_ROWS=45K`, `_MAX_RSF_ROWS=35K`
-- Raised `_MAX_COX_FEATURES` 20→30 to include injury history + workload features
-- Arm-injury-only event definition (filter to elbow/shoulder/forearm IL stints)
-- All 4 model families: Cox PH (untuned), Weibull AFT, RSF, GBSA
-- Hyperparameter tuning: Cox PH penalizer×l1_ratio, RSF depth/estimators, GBSA lr/depth
-- **Current best C-index: 0.5559 (tuned Cox PH, pen=0.01, l1_ratio=0.5)**
-
-## New approaches to consider
-
-1. **Stratified Cox PH on `prior_il_elbow`** — Schoenfeld residuals explicitly flagged this feature (p=0.002) as violating the proportional hazards assumption. Lifelines directly recommends `strata=['prior_il_elbow']` for features with few unique values (0–4). Stratification gives each stratum its own baseline hazard shape: pitchers with 0 vs 1 vs 2+ prior elbow IL stints likely have qualitatively different injury trajectories. HR is currently 1.20 (p=8.5e-10) — the 3rd strongest predictor. Removing its PH assumption should improve both model fit and C-index. **CHOSEN for Round 1.**
-
-2. **Log-normal AFT** — Weibull AFT assumes a monotone hazard. Log-normal allows a non-monotone hazard (rises then falls), which may better fit pitcher injury risk accumulation. Already importable via `train_aft_model(distribution='lognormal')`. Trivial to add.
-
-3. **Log-logistic AFT** — Heavy-tailed distribution. Captures the small subset of pitchers with very high chronic risk better than Weibull. Same one-line addition.
-
-4. **Ensemble risk score** — Normalize log-hazard from Cox + RSF + GBSA into [0,1], rank-average. Literature shows +0.01–0.03 C-index improvement from model diversity without any new features.
-
-5. **GBSA feature importance-based Cox feature selection** — Replace univariate `corrwith(E)` filter with GBSA's `feature_importances_`, which captures multivariate interaction effects. Current top-5 by correlation: days_since_last_injury, prior_il_elbow, sl_pct, ch_pct_30d_avg, acwr_7_28. GBSA-ranked top-5 might be different.
-
-6. **Frailty model (GammaMixtureFrailtyFitter)** — Pitcher-level random effects for unobserved heterogeneity (some pitchers structurally more injury-prone regardless of workload). Clinical recurrent-event literature reports +0.01–0.05 C-index. Complex to implement and requires lifelines experimental API.
-
-7. **More aggressive GBSA grid search** — FAST_TUNING=True only tested 2 GBSA configs. Expand to n_estimators=[200,300,500], subsample=[0.5,0.8], dropout_rate and use all seasons for tuning.
-
-8. **Season phase features** — Early/mid/late season indicator (none in current feature matrix). Injury hazard likely varies across season (spring arm fatigue, late-season overuse). Would capture within-season baseline hazard variation that Cox can't currently model.
-
-9. **Cumulative injury burden** — `total_prior_il_count` (all IL stints, not just arm) and `days_since_any_il` (not just arm). Recurrent-event survival literature: past injury count is the strongest single predictor of future injury beyond arm-specific counts.
-
-10. **Time×covariate interaction for PH violators** — `days_since_last_injury` also violates PH (p=0.016). Adding `days_since_last_injury × log(time)` as a synthetic feature allows the HR to vary with time within the Cox PH framework. Equivalent to a restricted time-varying Cox without the complexity of truly time-varying covariates.
-
----
-
-# Previous session notes (2026-06-19 earlier)
-
-## Already tried (from improvement_progress.json)
-- None (first survival-specific round; prior binary-classifier rounds are in model_improvement_log.md)
-
-## Baseline
-- Best untuned C-index: 0.514 (RSF)
-- Best tuned C-index: 0.535 (Cox pen=0.5, l1_ratio=0.5)
-- All models: IBS ~0.53-0.54 (near null model)
-
-## Critical bug found during orientation
-`_MAX_COX_ROWS = 12_000 < 18,007 events` in training set → `_subsample()` hits the
-"events only" branch → **0 censored observations in any model's training data**.
-Cox PH, AFT Weibull, and RSF are all trained on a 100%-event dataset. This breaks
-the censoring structure survival models depend on and is the most likely root cause
-of near-random C-index.
-
-## New approaches to consider
-
-1. **Fix events-only subsample (HIGHEST VALUE)** — Raise `_MAX_COX_ROWS` from 12,000
-   to ≥40,000 so `_subsample()` keeps all 18,007 events + ~22K censored rows. Same
-   for `_MAX_RSF_ROWS` → 30,000. Training survival models on datasets with 0 censored
-   rows is methodologically broken and explains the near-random C-index.
-   Evidence: Harrell et al. (1996) show Cox PH C-index degrades badly when censoring
-   structure is absent from training.
-
-2. **Gradient Boosted Survival (GBS)** — `GradientBoostingSurvivalAnalysis` from
-   scikit-survival. Nonlinear, handles feature interactions, no PH assumption. Often
-   best on tabular survival data. Needs proper censoring ratio first (idea 1).
-
-3. **Arm-only injury event filter** — Redefine the survival event as arm/shoulder/elbow
-   IL stints only, removing noise from oblique strains, leg injuries, etc. Reduces
-   label noise. Needs filtering `data/processed/injuries_clean.parquet` on injury type.
-
-4. **Time since last injury feature** — `days_since_last_IL` is the strongest single
-   predictor in clinical recurrence survival literature (frailty proxy). Not currently
-   in the feature matrix. Add in NB05 or inline in NB07.
-
-5. **Cumulative injury count feature** — `prior_IL_count` per pitcher up to each row.
-   Captures structural frailty (chronically injury-prone pitchers). Easy to compute.
-
-6. **Stratified Cox PH by starter/reliever** — Stratify the baseline hazard by role.
-   The PH assumption test already showed `pitches_28d` and ACWR violate PH — stratifying
-   by role partially relaxes this. Lifelines supports `strata` arg in `.fit()`.
-
-7. **Log-normal / Log-logistic AFT** — Try additional AFT distributions. Log-logistic
-   has a non-monotonic hazard (rises then falls), which may fit injury risk patterns
-   better than Weibull's monotone hazard.
-
-8. **Season-phase feature** — bin `game_number_in_season` into early/mid/late/postseason.
-   Hazard shape changes across the season (fresh vs. fatigued arm). Non-PH features
-   were flagged by Schoenfeld residuals; a discrete phase variable might help.
-
-9. **Maintain realistic censoring ratio in subsample** — Instead of just raising the cap,
-   explicitly enforce: keep all events + sample censored to maintain ~50% censoring
-   in the training subsample. This gives the model more "safe" examples to calibrate on.
-
-10. **Calibration recalibration at t=30/60/90** — Apply isotonic regression to survival
-    probabilities at fixed horizons. Can improve IBS even if C-index is flat.
-
-## Status (2026-06-19)
-
-**Round 0 (already implemented in code, notebook not yet rerun):**
-- Idea 1 is done: `_MAX_COX_ROWS=45,000`, `_MAX_RSF_ROWS=35,000` in survival_models.py
-- Side-effect: with correct E variation in subsample, `corrwith(E)` now works →
-  `prior_il_total` (|corr|=0.203, strongest predictor) will appear in Cox feature selection
-
-**Critical additional bug found:**
-- `_select_top_features` selects by correlation with EVENT INDICATOR (binary)
-- With old all-events subsample: E was constant (all 1s) → correlation undefined → fallback to first 20 cols
-- First 20 cols are workload/velocity — `prior_il_total` was NEVER in Cox model
-- Fix: raise `_MAX_COX_FEATURES` from 20 → 30 to capture both injury history AND workload
-
-## Round 1 (this session) — Chosen approach
-
-**GradientBoostingSurvivalAnalysis + raise Cox feature cap**
-- Add `GradientBoostingSurvivalAnalysis` from sksurv 0.27.0 (confirmed available)
-- Nonlinear, no PH assumption, uses ALL features (no pre-selection bottleneck)
-- Captures `prior_il_total` × workload interactions that Cox and RSF miss
-- Raise `_MAX_COX_FEATURES` from 20 → 30 so Cox also includes injury history + workload
-- The notebook rerun with fixed caps is the prerequisite — both fixes activate together
-
-## New ideas to consider beyond Round 1
-
-### From 2026-06-19 analysis
-
-11. **Log-rank feature selection** — Replace `corrwith(E)` with univariate log-rank p-values.
-    Log-rank tests whether a feature stratifies survival curves — directly relevant to C-index.
-    `acwr_7_28` (PH violation, real signal) would score much higher than by binary correlation.
-
-12. **Add age to features** — `age` is in ID_COLS (excluded). Older pitchers have accumulated
-    stress. Age is among top-5 predictors in clinical pitcher injury survival literature.
-
-13. **CoxnetSurvivalAnalysis (sksurv)** — sksurv's penalized Cox handles 80 features natively
-    without pre-selection. Avoids the feature selection bottleneck entirely. Faster than lifelines.
-
-14. **Frailty model** — `GammaMixtureFrailtyFitter` (lifelines) adds pitcher random effects.
-    Addresses recurrent-event structure: same pitcher appears hundreds of times.
-
-15. **Arm-injury-only event** — Filter to arm/shoulder/elbow IL stints. Removes noise from
-    leg injuries which pitch-load features can't predict.
+## 2026-06-20 Round S-001 brainstorm (archived)
+- Chosen: Stochastic GBSA subsample=0.8 — +0.0032 improvement
+- Best GBSA config: n=100, lr=0.1, depth=2, subsample=0.8, max_features=None
