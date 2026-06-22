@@ -20,6 +20,36 @@ import pandas as pd
 FASTBALL_TYPES = {"FF", "SI", "FC"}
 SLIDER_TYPES = {"SL", "ST"}
 
+# Physically plausible velocity range (mph) per Statcast pitch type.
+# Pitches outside these bounds are Statcast tracking errors, position-player
+# appearances, or eephus novelties that would corrupt mean/rolling features.
+# Types not listed fall back to a wide (50–115) permissive range.
+PITCH_SPEED_BOUNDS: dict[str, tuple[float, float]] = {
+    "FF": (80, 105),   # 4-seam fastball
+    "SI": (80, 105),   # sinker
+    "FC": (80, 105),   # cutter
+    "SL": (70, 100),   # slider
+    "ST": (70,  95),   # sweeper
+    "CU": (65,  90),   # curveball
+    "KC": (65,  90),   # knuckle-curve
+    "SV": (65,  90),   # slurve
+    "CH": (70,  95),   # changeup
+    "FS": (70,  95),   # splitter
+    "KN": (55,  80),   # knuckleball
+    "EP": (45,  70),   # eephus
+}
+
+
+def _filter_speed_bounds(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows whose release_speed is outside the per-pitch-type plausible range."""
+    lo = pd.Series(50.0, index=df.index)
+    hi = pd.Series(115.0, index=df.index)
+    for pt, (pt_lo, pt_hi) in PITCH_SPEED_BOUNDS.items():
+        mask = df["pitch_type"] == pt
+        lo[mask] = pt_lo
+        hi[mask] = pt_hi
+    return df[df["release_speed"].between(lo, hi)]
+
 
 def compute_game_velocity_stats(pitch_df: pd.DataFrame) -> pd.DataFrame:
     """Compute per-game fastball velocity summary statistics per pitcher.
@@ -39,6 +69,8 @@ def compute_game_velocity_stats(pitch_df: pd.DataFrame) -> pd.DataFrame:
     """
     df = pitch_df.copy()
     df["game_date"] = pd.to_datetime(df["game_date"])
+
+    df = _filter_speed_bounds(df)
 
     # Fastball-only subset
     fb = df[df["pitch_type"].isin(FASTBALL_TYPES)]

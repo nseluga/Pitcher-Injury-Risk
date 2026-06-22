@@ -14,8 +14,15 @@ Feature categories:
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+# Non-overlapping primary pitch groups; their per-game rates must sum to ≤ 1.0.
+_PRIMARY_GROUPS = ["fb_pct", "sl_pct", "cu_pct", "ch_pct"]
 
 PITCH_GROUPS = {
     "fb_pct":       {"FF", "SI", "FC"},
@@ -86,6 +93,20 @@ def compute_game_pitch_mix(pitch_df: pd.DataFrame) -> pd.DataFrame:
         pitch_type_counts[["pitcher", "game_date", "pitch_mix_entropy"]],
         on=["pitcher", "game_date"], how="left"
     )
+
+    # Validate: non-overlapping primary groups must sum to ≤ 1.0.
+    # A sum > 1 signals a pitch_type coding bug (e.g. a type counted in two groups).
+    present = [c for c in _PRIMARY_GROUPS if c in totals.columns]
+    group_sum = totals[present].sum(axis=1)
+    bad = group_sum > 1.0 + 1e-4
+    if bad.any():
+        logger.warning(
+            "%d game rows have primary pitch group rates summing > 1.0 "
+            "(max=%.4f); clipping each rate to [0, 1].",
+            bad.sum(), group_sum.max(),
+        )
+        for col in present:
+            totals[col] = totals[col].clip(0.0, 1.0)
 
     return totals
 

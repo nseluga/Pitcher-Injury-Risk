@@ -367,6 +367,61 @@ def train_random_survival_forest(
     return model
 
 
+def train_extra_survival_trees(
+    X_train: pd.DataFrame,
+    T_train: pd.Series,
+    E_train: pd.Series,
+    max_train_rows: int = _MAX_RSF_ROWS,
+    n_estimators: int = 100,
+    max_depth: int = 6,
+    min_samples_leaf: int = 20,
+) -> object:
+    """Train an Extra Survival Trees ensemble using scikit-survival.
+
+    ExtraSurvivalTrees extends RSF by using random (rather than optimal) split
+    thresholds for each feature, plus the log-rank criterion for split quality.
+    The additional randomization produces trees that are more decorrelated from
+    GBSA (which also uses optimal splits) — increasing ensemble diversity beyond
+    what RSF already provides. Same interface as RandomSurvivalForest.
+
+    Args:
+        X_train: Training feature matrix.
+        T_train: Duration series.
+        E_train: Event indicator series.
+        max_train_rows: Subsample cap (same default as RSF).
+        n_estimators: Number of trees.
+        max_depth: Maximum tree depth.
+        min_samples_leaf: Minimum samples required at a leaf node.
+
+    Returns:
+        Fitted ExtraSurvivalTrees object with `_imputer_` and `_feature_cols_` attached.
+    """
+    from sksurv.ensemble import ExtraSurvivalTrees
+
+    X_train, T_train, E_train = _subsample(X_train, T_train, E_train, max_train_rows)
+
+    X_imp, imputer = _impute(X_train)
+    X_imp = _drop_zero_variance(X_imp)
+
+    y = np.array(
+        [(bool(e), t) for e, t in zip(E_train.values, T_train.values)],
+        dtype=[("event", bool), ("time", float)],
+    )
+
+    model = ExtraSurvivalTrees(
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        min_samples_leaf=min_samples_leaf,
+        max_features="sqrt",
+        n_jobs=-1,
+        random_state=42,
+    )
+    model.fit(X_imp, y)
+    model._imputer_ = imputer
+    model._feature_cols_ = list(X_imp.columns)
+    return model
+
+
 def train_gradient_boosted_survival(
     X_train: pd.DataFrame,
     T_train: pd.Series,

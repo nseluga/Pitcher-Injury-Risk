@@ -1,3 +1,75 @@
+# Survival Model Improvement Ideas — 2026-06-21 Round S-005
+
+## Status entering S-005
+- Rounds completed: 4
+- Best C-index: 0.5658 (3-model ensemble: GBSA+Cox+RSF)
+- consecutive_non_improvements: 1 (S-004 AFT regression -0.0021, reverted)
+
+## Already tried
+- Arm-only event definition, Stratified Cox, Elastic-net Cox, GBSA addition (pre-tracking)
+- S-001: Stochastic GBSA subsample=0.8 → +0.0032
+- S-002: GBSA column subsampling → null result
+- S-003: Ensemble rank-average (GBSA+Cox+RSF) → +0.0067
+- S-004: Log-normal AFT as 4th ensemble member → -0.0021 (reverted; AFT C=0.5447 too weak)
+
+## New approaches for S-005+ (brainstorm 2026-06-21)
+
+1. **ExtraSurvivalTrees** (CHOSEN) — sksurv ExtraSurvivalTrees uses random split thresholds
+   (not optimized), adding randomness beyond RSF's feature subsampling. Uses log-rank criterion
+   (survival-specific split quality). More decorrelated from GBSA than RSF is, since both RSF
+   and GBSA use optimal split points. Key: "randomness goes one step further in way splits are
+   computed" (sksurv docs). Test as RSF replacement AND as 4th ensemble member.
+   EV: if EST C≥0.55 and errors decorrelated from GBSA, ensemble gain +0.003–0.010.
+
+2. **CoxnetSurvivalAnalysis** — Coordinate-descent LASSO/elastic-net Cox over all 82 features.
+   Research: Coxnet achieved C=0.688 on UK Biobank data, similar to RSF. Avoids correlation-based
+   pre-selection bias (current Cox uses top-30 by corrwith(E)). Could find jointly-predictive
+   features the correlation filter misses. If Coxnet C≥0.562, replace Cox in ensemble.
+
+3. **GBSA with IPCWLS loss** — `GradientBoostingSurvivalAnalysis(loss='ipcwls')`. With 91%
+   censoring, inverse-probability-censoring-weighted LS is theoretically more efficient than Cox PL.
+   One-parameter change. If IPCWLS-GBSA C > Cox-loss GBSA (0.5591), swap.
+
+4. **Log-rank feature selection for Cox** — Replace corrwith(E) with log-rank p-value ranking
+   (lifelines logrank_test). Log-rank directly tests survival curve stratification; acwr_7_28
+   (known signal, PH violator) should rank higher than on binary correlation.
+
+5. **Season-phase feature** — Early/mid/late season indicator. Injury hazard varies by season.
+   Requires NB05 edit + feature_matrix rebuild.
+
+6. **Weighted ensemble optimization** — Optimize GBSA:Cox:RSF weights on held-out 2022 season
+   (validation fold) before applying to test. GBSA has highest C (0.5591), Cox second (0.5559).
+   Equal weights may underweight GBSA contribution.
+
+7. **Multi-strata Cox (bin fb_pct_30d_avg)** — fb_pct_30d_avg is strongest Schoenfeld PH
+   violator (p<5e-5). Add quartile-binned fb_pct to strata alongside prior_il_elbow.
+
+8. **Cumulative all-injury IL count** — total_prior_il_count across ALL body parts as frailty
+   proxy (not just arm-specific). Strongest recurrent-event frailty proxy in literature.
+
+9. **Frailty model (GammaMixtureFrailtyFitter)** — Pitcher-level random effects for structural
+   injury proneness. lifelines experimental API — highest risk, highest ceiling.
+
+10. **Time-varying covariate Cox** — Use long-format counting process for acwr_7_28 (PH violator).
+    High implementation cost, reserve for last resort.
+
+## Decision for S-005
+**Idea 1: ExtraSurvivalTrees as RSF replacement + possible 4th ensemble member.**
+- S-004 failure was AFT at C=0.5447 (too weak). EST expected to match RSF (C≈0.555).
+- Structural difference from RSF: random split thresholds + log-rank criterion.
+- GBSA and RSF both use optimal split points → correlated errors.
+- EST uses random splits → structurally decorrelated from GBSA → better ensemble diversity.
+- Try: (a) EST replacing RSF, (b) EST as 4th member if C≥0.55.
+- Low risk: if EST C < 0.55, don't add it; ensemble stays at 0.5658.
+
+## Research findings (2026-06-21)
+- sksurv docs: "Compared to RandomSurvivalForest, randomness goes one step further in way
+  splits are computed" in ExtraSurvivalTrees. Uses log-rank splitting (survival-specific).
+- CoxnetSurvivalAnalysis benchmark (UK Biobank, arXiv:2503.08870): C=0.688, nearly equal to
+  RSF — better regularization than univariate pre-selection.
+
+---
+
 # Survival Model Improvement Ideas — 2026-06-21 Round S-004 (SESSION 3 — NEW RUN)
 
 ## Session re-orientation (2026-06-21, session 3)

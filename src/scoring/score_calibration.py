@@ -228,7 +228,7 @@ def build_normalization_reference(
     """
     ref = (
         risk_df
-        .groupby(["season", "archetype"], observed=True)["raw_risk_score"]
+        .groupby(["season"], observed=True)["raw_risk_score"]
         .agg(mean_raw_score="mean", std_raw_score="std")
         .reset_index()
     )

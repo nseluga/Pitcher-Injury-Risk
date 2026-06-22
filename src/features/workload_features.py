@@ -115,11 +115,60 @@ def compute_season_to_date_workload(game_df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def compute_yoy_workload_spike(game_df: pd.DataFrame) -> pd.DataFrame:
+    """Add year-over-year workload spike features.
+
+    Computes the prior season's total pitch count for each pitcher, then
+    expresses the current season's accumulation as a ratio relative to that
+    baseline. A ratio >> 1 early in the season signals a workload spike that
+    is a known injury risk factor (RR ≈ 2.2 per PMC8721392).
+
+    Requires 'pitches_season_to_date' to already be present in game_df.
+    No leakage: prior_year_pitches is the FULL prior-season total, which is
+    entirely in the past for any game in the current season.
+
+    Args:
+        game_df: Game-level DataFrame with pitcher, game_date, pitch_count,
+            and pitches_season_to_date.
+
+    Returns:
+        game_df with new columns prior_year_pitches and yoy_workload_ratio.
+    """
+    df = game_df.copy()
+    df["game_date"] = pd.to_datetime(df["game_date"])
+    if "season" not in df.columns:
+        df["season"] = df["game_date"].dt.year
+
+    # Total pitches per pitcher per season (full season, all games)
+    season_totals = (
+        df.groupby(["pitcher", "season"])["pitch_count"]
+        .sum()
+        .reset_index()
+        .rename(columns={"pitch_count": "prior_year_pitches", "season": "prior_season"})
+    )
+    # Shift forward by 1 year so we can join onto current-season rows
+    season_totals["season"] = season_totals["prior_season"] + 1
+
+    df = df.merge(
+        season_totals[["pitcher", "season", "prior_year_pitches"]],
+        on=["pitcher", "season"],
+        how="left",
+    )
+
+    # Ratio: how far into a repeat-workload season is this pitcher, relative
+    # to what they threw all of last year?  NaN for debut seasons (no prior year).
+    df["yoy_workload_ratio"] = (
+        df["pitches_season_to_date"] / df["prior_year_pitches"].clip(lower=1)
+    ).round(4)
+
+    return df
+
+
 def build_workload_features(game_df: pd.DataFrame) -> pd.DataFrame:
     """Run all workload feature computations and return the enriched DataFrame.
 
-    Computes rolling pitch counts (7/28/90 days), rest days, ACWR, and
-    season-to-date accumulation.
+    Computes rolling pitch counts (7/28/90 days), rest days, ACWR,
+    season-to-date accumulation, and year-over-year workload spike.
 
     Args:
         game_df: Game-level pitcher DataFrame with pitcher, game_date,
@@ -144,5 +193,8 @@ def build_workload_features(game_df: pd.DataFrame) -> pd.DataFrame:
 
     # Season-to-date
     df = compute_season_to_date_workload(df)
+
+    # YoY workload spike
+    df = compute_yoy_workload_spike(df)
 
     return df

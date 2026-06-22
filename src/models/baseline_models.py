@@ -182,12 +182,14 @@ def train_gradient_boosting(
         from lightgbm import LGBMClassifier
 
         clf = LGBMClassifier(
-            n_estimators=300,
-            max_depth=4,
+            n_estimators=500,
+            num_leaves=63,
             learning_rate=0.05,
             subsample=0.8,
+            subsample_freq=1,
             colsample_bytree=0.8,
-            class_weight="balanced",
+            min_child_samples=20,
+            is_unbalance=True,
             random_state=42,
             n_jobs=-1,
             verbosity=-1,

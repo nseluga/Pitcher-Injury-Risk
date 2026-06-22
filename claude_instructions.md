@@ -35,46 +35,61 @@ cat docs/model_improvement_log.md 2>/dev/null | tail -120
 
 ---
 
-## Phase 3A — Model Improvement Protocol
+## Phase 3A — Survival Model Improvement Protocol
 
 ### Goal
 
-The current models are weak. Key baseline metrics (temporal CV, folds 1–4):
-- **XGBoost 30d:** AUC-ROC = 0.578, PR-AUC = 0.127
-- **Random Forest 30d:** AUC-ROC = 0.586, PR-AUC = 0.137
-- **Survival (RSF) C-index:** 0.514 (near-random)
+The binary injury classifiers are near their ceiling. The focus now shifts to **survival models in NB07**, which answer a richer question: *when* is a pitcher likely to get injured, not just *whether*. A good survival model produces actionable workload management signals — e.g., "this pitcher's median time-to-next-injury is 14 days given current load" — that go beyond a binary flag.
 
-The primary metric is **PR-AUC on the 30-day injury horizon, averaged across temporal CV folds 1–4** (exclude fold 0 = 2020, COVID year). Target: push PR-AUC above 0.20. Secondary metrics: AUC-ROC, Brier score.
+Current survival model baselines (NB07):
+- **Cox PH C-index:** 0.514 (near-random)
+- **Weibull AFT C-index:** ~0.51
+- **RSF C-index:** ~0.51
+- **IBS:** not yet meaningfully better than null model
+
+Primary metric: **C-index on the held-out test set** (higher = better, 0.5 = random, 1.0 = perfect). Secondary: Integrated Brier Score (IBS), meaningful hazard ratios, interpretable survival curves that tell a real story about pitcher risk.
+
+### Step 0 — Brainstorm Before Every Round
+
+**Before picking an idea, generate a fresh brainstorm list.** Read NB07 cell by cell to understand the current model setup, then write a list of 8–10 concrete approaches you haven't tried yet to `.scratch/survival_improvement_ideas.md`. Structure it as:
+
+```markdown
+# Survival Model Improvement Ideas — [DATE]
+
+## Already tried (from improvement_progress.json)
+- [list]
+
+## New approaches to consider
+1. [Approach] — [why it might help, evidence]
+2. ...
+```
+
+Then pick the highest-expected-value idea from that list and proceed. This brainstorm step is mandatory every round — it prevents narrow fixation on one approach.
 
 ### Improvement Categories to Explore
 
-Work through these roughly in priority order. Do not repeat an approach that has already been logged as tried. Read `docs/model_improvement_log.md` first.
+Do not repeat an approach already logged as tried. Read `docs/model_improvement_log.md` first.
 
-#### Feature Engineering (highest expected value)
-- **Year-over-year workload spike:** `season_pitches_current / season_pitches_prior_year`. Pitchers crossing a large YoY increase are high-risk.
-- **Irregular rest:** binary flag for `days_rest < 4 OR days_rest > 12`. Both extremes are injury-associated.
-- **Age × workload interaction:** `age * pitches_90d`. Older pitchers tolerate less accumulated load.
-- **Pitch shape deterioration:** rolling std of `spin_rate`, `pfx_x`, `pfx_z` — increasing variance signals mechanical breakdown.
-- **Better ACWR windows:** add 5:14 and 3:21 ACWR ratios alongside current 7:28.
-- **First-career-high-workload flag:** first season crossing 150 IP or 2500 pitches — high-risk transition.
-- **Consecutive high-effort starts:** count of prior starts with pitch_count > 100 in last 3 starts.
-- **Command drift:** rolling trend in zone% or first-pitch-strike% (declining = fatigue signal).
+#### Survival-Specific Model Architectures
+- **Penalized Cox (LASSO/Elastic Net):** replace the current Cox PH with a regularized version (`CoxnetSurvivalAnalysis` from scikit-survival). Better feature selection, more stable coefficients when features >> events.
+- **Stratified Cox PH:** stratify the baseline hazard by pitcher role (starter vs reliever) or age group to relax the proportional hazards assumption. Test with Schoenfeld residuals first.
+- **Log-normal and log-logistic AFT:** add these distributions alongside Weibull AFT — different assumptions about hazard shape, may fit injury timing better.
+- **Gradient boosted survival (GBS):** try `GradientBoostingSurvivalAnalysis` from scikit-survival. Nonlinear, handles interactions automatically, often outperforms Cox on tabular data.
+- **Frailty / shared frailty model:** add pitcher-level random effects to capture unobserved heterogeneity (some pitchers are just injury-prone regardless of workload). Requires `lifelines` GammaMixtureFrailtyFitter.
+- **DeepSurv / neural survival:** small MLP trained with negative log-likelihood of Cox PH using `pycox` or `auton-survival`. Can capture feature interactions Cox misses.
 
-#### Label / Training Strategy
-- **Arm-specific injury labels:** re-label `injured_next_30d` using only shoulder/elbow/forearm IL stints from the injury database, not all IL types. This removes noise from non-arm injuries. Check `data/processed/injuries.parquet` for injury type columns.
-- **Focal loss for XGBoost:** use `scale_pos_weight` tuned to maximize PR-AUC rather than accuracy. Try values from 3× to 10× the class imbalance ratio.
-- **SMOTE only within CV folds:** verify that SMOTE is applied inside each training fold, never to the held-out test set. If leakage exists, fix it.
-- **Positive-unlabeled (PU) correction:** pitchers who avoided the IL may have had unreported injuries. Apply Elkan & Noto (2008) PU correction as a post-processing step on predictions.
+#### Feature Engineering for Time-to-Event
+- **Time since last injury:** days elapsed since the pitcher's most recent IL stint. Strong prior in clinical survival literature.
+- **Cumulative injury count:** total prior IL stints — "frailty proxy" for pitchers with recurrent injuries.
+- **Season phase:** early (games 1–30), mid, late, postseason — hazard likely varies across the season.
+- **Start-count fatigue:** starts_this_season × avg_pitch_count_per_start — accumulated within-season stress.
+- **Arm-injury-only survival target:** re-define the event as only arm/shoulder/elbow IL stints (filter `data/processed/injuries_clean.parquet` on injury type). Removes noise from oblique strains, leg injuries, etc.
 
-#### Model Architecture
-- **LightGBM:** try LightGBM as an alternative to XGBoost. Often outperforms on imbalanced tabular data. Add to NB06 alongside existing models.
-- **Feature selection:** use permutation importance from temporal CV to identify top-25 features and retrain on that reduced set. Many near-zero-SHAP features add noise.
-- **Stacking ensemble:** use out-of-fold predictions from RF, XGBoost, LightGBM, and the RSF hazard score as inputs to a logistic regression meta-learner.
-- **Calibration post-processing:** apply Platt scaling (sigmoid calibration) or isotonic regression calibration to the best classifier's output and verify Brier score improves.
-
-#### Threshold Optimization
-- **F2-optimal threshold:** tune the decision threshold to maximize F2 score (β=2, recall-weighted) on the temporal CV validation folds. Report precision and recall at that threshold.
-- **Precision-at-recall curves:** target recall ≥ 0.50 and report what precision is achievable at that operating point.
+#### Calibration and Interpretability
+- **Survival curve visualization:** plot Kaplan-Meier curves stratified by workload quartile (pitches_90d) and compare to model-predicted curves. If they align, the model is capturing real signal.
+- **Hazard ratio table:** extract and report the top-10 most significant Cox PH coefficients with 95% CIs. A table of meaningful HRs (e.g., ACWR HR = 1.8, p < 0.05) is publishable signal even if C-index is modest.
+- **Calibration at fixed horizons:** compute Brier score at t=30, t=60, t=90 days to see where the model is most/least calibrated.
+- **IBS improvement via recalibration:** apply isotonic regression to survival probability outputs.
 
 ### Improvement Protocol — One Round Per Session
 
@@ -82,41 +97,42 @@ Work through these roughly in priority order. Do not repeat an approach that has
 ```bash
 cat .scratch/improvement_progress.json
 cat docs/model_improvement_log.md | tail -120
-cat reports/tables/baseline_model_metrics.csv
 ```
 
-**Step 2 — Pick the next idea:**
-- Read `improvement_progress.json` to see what's been tried and what the deltas were.
-- Pick the highest-expected-value idea NOT yet attempted from the categories above.
-- If all obvious ideas are exhausted and 3+ consecutive rounds showed PR-AUC delta < 0.005, set `_meta.status = "converged"` in `improvement_progress.json` and stop Phase 3A.
+**Step 2 — Brainstorm (required):**
+- Read NB07 cell by cell to understand the current survival model implementation.
+- Write `.scratch/survival_improvement_ideas.md` with 8–10 ideas (see Step 0 format above).
+- Pick the highest-expected-value idea not yet attempted.
+- If 3+ consecutive rounds showed C-index delta < 0.005 AND no obvious high-value ideas remain, set `_meta.status = "converged"` in `improvement_progress.json`.
 
 **Step 3 — Research (1–2 WebSearches):**
-Run targeted searches to ground the approach in evidence before implementing. Examples:
-- `"LightGBM class imbalance baseball injury prediction"`
-- `"focal loss XGBoost injury prediction"`
-- `"SMOTE temporal cross-validation leakage"`
-- `"pitcher workload spike year-over-year injury risk"`
+Ground the chosen idea in evidence before implementing. Example searches:
+- `"penalized Cox survival analysis baseball injury prediction"`
+- `"gradient boosted survival trees C-index improvement"`
+- `"time-varying covariates pitcher workload survival model"`
+- `"frailty model recurrent sports injury"`
 Note the 1–2 most relevant findings. Do not spend more than 2 searches — implement and measure.
 
 **Step 4 — Implement:**
-- Edit the relevant notebook (usually NB05 for features, NB06 for models, NB07 for survival, NB09 for score construction).
+- Primary target: `notebooks/07_survival_models.ipynb` and `src/models/survival_models.py`.
+- May also touch NB05 for new survival-relevant features.
 - Keep changes minimal and targeted — one idea per round.
 - Respect the methodology constraints (no leakage, no causal claims).
 
 **Step 5 — Test:**
 ```bash
 # TEST_MODE first
-python run_notebooks.py --only NN --fail-fast
+python run_notebooks.py --only 07 --fail-fast
 
 # Full run if TEST_MODE passes
-python run_notebooks.py --only NN --fail-fast
+python run_notebooks.py --only 07 --fail-fast
 
 # Verify
-python scripts/verify_outputs.py --only NN
+python scripts/verify_outputs.py --only 07
 ```
 
 **Step 6 — Measure:**
-Read the updated metrics CSVs. Compute the delta in PR-AUC (30d, temporal CV mean folds 1–4).
+Report C-index (test set) and IBS. Also note whether survival curves or hazard ratios tell a meaningful story — interpretability is a win even when C-index gain is small.
 
 **Step 7 — Log in `docs/model_improvement_log.md`:**
 
@@ -132,15 +148,15 @@ Read the updated metrics CSVs. Compute the delta in PR-AUC (30d, temporal CV mea
 ### Results
 | Metric | Before | After | Delta |
 |--------|--------|-------|-------|
-| PR-AUC 30d (CV mean) | X.XXX | X.XXX | +X.XXX |
-| AUC-ROC 30d (CV mean) | X.XXX | X.XXX | +X.XXX |
-| Brier score | X.XXX | X.XXX | +X.XXX |
+| C-index (test) | X.XXX | X.XXX | +X.XXX |
+| IBS | X.XXX | X.XXX | +X.XXX |
+| Notable HRs / curves | — | [description] | — |
 
 ### Verdict
-[Kept / Reverted — reason]
+[Kept / Reverted — reason. Note any interpretable signal even if C-index was flat.]
 ```
 
-If the change made things worse, revert it (git checkout the notebook) and log the null result. Null results are informative.
+If the change made things worse, revert it (`git checkout notebooks/07_survival_models.ipynb src/models/survival_models.py`) and log the null result. Null results are informative.
 
 **Step 8 — Update `.scratch/improvement_progress.json`:**
 
@@ -149,32 +165,32 @@ Structure:
 {
   "_meta": {
     "status": "in_progress",
-    "baseline_pr_auc_30d": 0.137,
-    "best_pr_auc_30d": 0.137,
+    "baseline_c_index": 0.514,
+    "best_c_index": 0.514,
     "consecutive_non_improvements": 0,
     "rounds_completed": 0
   },
   "round_001": {
     "status": "done",
-    "category": "feature_engineering",
-    "description": "Add YoY workload spike feature",
-    "pr_auc_before": 0.137,
-    "pr_auc_after": 0.152,
-    "delta": 0.015,
-    "notebooks_changed": ["05", "06"],
-    "verdict": "kept"
+    "category": "model_architecture",
+    "description": "Penalized Cox with LASSO feature selection",
+    "c_index_before": 0.514,
+    "c_index_after": 0.531,
+    "delta": 0.017,
+    "notebooks_changed": ["07"],
+    "verdict": "kept — C-index +0.017, top HRs interpretable"
   }
 }
 ```
 
 Set `_meta.status = "converged"` when:
-- 3+ consecutive rounds produced delta < 0.005 and no obvious high-value ideas remain, OR
+- 3+ consecutive rounds produced C-index delta < 0.005 and no obvious high-value ideas remain, OR
 - 10 rounds have been completed.
 
 **Step 9 — Commit:**
 ```bash
-git add notebooks/ src/ docs/model_improvement_log.md .scratch/improvement_progress.json reports/
-git commit -m "Phase 3A round N: [short description] (PR-AUC +X.XXX)"
+git add notebooks/07_survival_models.ipynb src/models/survival_models.py docs/model_improvement_log.md .scratch/improvement_progress.json .scratch/survival_improvement_ideas.md
+git commit -m "Phase 3A round N: [short description] (C-index +X.XXX)"
 ```
 
 ---

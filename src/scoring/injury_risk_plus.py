@@ -210,9 +210,9 @@ def compute_seasonal_risk_plus(
     reference_df = build_normalization_reference(risk_df)
 
     irp = pd.Series(index=risk_df.index, dtype=float)
-    for (season, archetype), group in risk_df.groupby(["season", "archetype"], observed=True):
+    for season, group in risk_df.groupby("season", observed=True):
         irp.loc[group.index] = normalize_to_injury_risk_plus(
-            group["raw_risk_score"], season=season, archetype=archetype, reference_df=reference_df,
+            group["raw_risk_score"], season=season, archetype=None, reference_df=reference_df,
         )
     risk_df["injury_risk_plus"] = irp
 

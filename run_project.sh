@@ -89,53 +89,61 @@ ps aux | grep -E "run_notebooks|jupyter|nbconvert" | grep -v grep
 IMPORTANT: After launching a notebook, STOP IMMEDIATELY. Do not poll.'
 
 # ---------------------------------------------------------------------------
-# PHASE 3A PROMPT — iterative model improvement
+# PHASE 3A PROMPT — survival model improvement
 # ---------------------------------------------------------------------------
-IMPROVE_PROMPT='Read claude_instructions.md and follow the Phase 3A Model Improvement Protocol.
+IMPROVE_PROMPT='Read claude_instructions.md and follow the Phase 3A Survival Model Improvement Protocol.
 
-The models currently achieve PR-AUC ~0.127–0.137 on the 30-day injury prediction
-task (temporal CV, folds 1-4). This is only slightly above the naive baseline (~0.10).
-Your job is to run ONE improvement round this session: research, implement, test,
-measure the PR-AUC delta, log, and commit.
+The binary classifiers have plateaued. The goal now is to find useful signal in
+the survival models (NB07) — models that answer *when* a pitcher is likely to get
+injured, not just whether. Current C-index is ~0.514 (near-random). Your job is
+to run ONE improvement round this session: brainstorm, research, implement, test,
+measure C-index delta, log, and commit.
 
 Step-by-step:
 
 1. Orient — read what has already been tried:
    cat .scratch/improvement_progress.json 2>/dev/null || echo "NOT STARTED"
    cat docs/model_improvement_log.md 2>/dev/null | tail -120
-   cat reports/tables/baseline_model_metrics.csv
 
-2. Pick the next untried improvement idea from the Phase 3A section of
-   claude_instructions.md. Do not repeat anything already logged. If
-   improvement_progress.json does not exist, create it with the baseline
-   metrics and status "in_progress".
+2. Read notebooks/07_survival_models.ipynb cell by cell to understand the
+   current survival model setup.
 
-3. Run 1-2 targeted WebSearches to ground the idea in research evidence.
+3. Write a brainstorm list of 8-10 new approaches to
+   .scratch/survival_improvement_ideas.md (see Step 0 format in
+   claude_instructions.md). This step is REQUIRED before picking an idea.
 
-4. Implement the change (usually NB05, NB06, NB07, or src/).
+4. Pick the highest-expected-value idea not yet attempted from your brainstorm
+   list. If improvement_progress.json does not exist, create it with baseline
+   C-index 0.514 and status "in_progress".
 
-5. Test:
-   python run_notebooks.py --only NN --fail-fast  (TEST_MODE first)
-   python run_notebooks.py --only NN --fail-fast  (full run)
-   python scripts/verify_outputs.py --only NN
+5. Run 1-2 targeted WebSearches to ground the idea in evidence.
 
-6. Measure PR-AUC delta (temporal CV mean, folds 1-4, 30-day horizon).
+6. Implement the change in notebooks/07_survival_models.ipynb and/or
+   src/models/survival_models.py. Keep it targeted — one idea per round.
 
-7. If the change hurt metrics, revert it:
-   git checkout notebooks/NN_*.ipynb src/
+7. Test:
+   python run_notebooks.py --only 07 --fail-fast  (TEST_MODE first)
+   python run_notebooks.py --only 07 --fail-fast  (full run)
+   python scripts/verify_outputs.py --only 07
 
-8. Log results in docs/model_improvement_log.md following the format in
-   claude_instructions.md.
+8. Measure C-index and IBS delta. Note any interpretable survival curves
+   or hazard ratios — these are wins even if C-index gain is small.
 
-9. Update .scratch/improvement_progress.json with the round result and
-   increment consecutive_non_improvements if delta < 0.005.
+9. If the change hurt metrics, revert it:
+   git checkout notebooks/07_survival_models.ipynb src/models/survival_models.py
 
-10. If consecutive_non_improvements >= 3 OR rounds_completed >= 10:
+10. Log results in docs/model_improvement_log.md following the format in
+    claude_instructions.md.
+
+11. Update .scratch/improvement_progress.json with the round result and
+    increment consecutive_non_improvements if C-index delta < 0.005.
+
+12. If consecutive_non_improvements >= 3 OR rounds_completed >= 10:
     set _meta.status = "converged" in improvement_progress.json.
 
-11. Commit:
-    git add notebooks/ src/ docs/model_improvement_log.md .scratch/improvement_progress.json reports/
-    git commit -m "Phase 3A round N: [description] (PR-AUC +X.XXX)"
+13. Commit:
+    git add notebooks/07_survival_models.ipynb src/models/survival_models.py docs/model_improvement_log.md .scratch/improvement_progress.json .scratch/survival_improvement_ideas.md
+    git commit -m "Phase 3A round N: [description] (C-index +X.XXX)"
 
 IMPORTANT: do NOT run a notebook without first checking for a running process:
 ps aux | grep -E "run_notebooks|jupyter|nbconvert" | grep -v grep
