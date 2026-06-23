@@ -34,6 +34,7 @@ plotly>=5.15.0
 # Interactive dashboards
 dash>=2.11.0
 dash-bootstrap-components>=1.4.0
+streamlit>=1.35.0
 
 # Notebooks
 jupyter>=1.0.0
