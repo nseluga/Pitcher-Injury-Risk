@@ -433,6 +433,7 @@ def train_gradient_boosted_survival(
     min_samples_leaf: int = 20,
     subsample: float = 0.8,
     max_features: str | float | int | None = None,
+    loss: str = "coxph",
 ) -> object:
     """Train a Gradient Boosted Survival Analysis model using scikit-survival.
 
@@ -459,10 +460,18 @@ def train_gradient_boosted_survival(
             Column subsampling adds feature diversity on top of row subsampling
             (subsample), creating "double stochastic" boosting. Particularly
             effective when features are correlated or redundant.
+        loss: Loss function to optimize. 'coxph' (default) uses Cox partial
+            likelihood — predict() returns log-hazard (higher = more risk).
+            'ipcwls' uses Inverse Probability of Censoring Weighted Least Squares —
+            an AFT-style objective that doesn't require the PH assumption and
+            corrects for censoring bias; predict() returns log-time (higher =
+            longer survival = lower risk). Sign convention differs — see
+            compute_concordance_index for handling. 'squared' uses squared
+            regression loss on log-time without censoring correction.
 
     Returns:
-        Fitted GradientBoostingSurvivalAnalysis object with `_imputer_` and
-        `_feature_cols_` attached for prediction replay.
+        Fitted GradientBoostingSurvivalAnalysis object with `_imputer_`,
+        `_feature_cols_`, and `_loss_` attached for prediction replay.
     """
     from sksurv.ensemble import GradientBoostingSurvivalAnalysis
 
@@ -477,6 +486,7 @@ def train_gradient_boosted_survival(
     )
 
     model = GradientBoostingSurvivalAnalysis(
+        loss=loss,
         n_estimators=n_estimators,
         learning_rate=learning_rate,
         max_depth=max_depth,
@@ -488,6 +498,7 @@ def train_gradient_boosted_survival(
     model.fit(X_imp, y)
     model._imputer_ = imputer
     model._feature_cols_ = list(X_imp.columns)
+    model._loss_ = loss  # needed by compute_concordance_index for sign convention
     return model
 
 
@@ -561,11 +572,16 @@ def compute_concordance_index(
     X_imp = _prepare_X_for_predict(model, X_test)
     type_name = type(model).__name__
 
-    # sksurv models (RSF, GBSA): predict() returns cumulative hazard — higher = higher risk.
-    # Negate so that concordance_index (which expects lower score = shorter survival) aligns.
-    if type_name in ("RandomSurvivalForest", "GradientBoostingSurvivalAnalysis"):
-        risk_scores = model.predict(X_imp)
-        return float(concordance_index(T_test, -risk_scores, E_test))
+    # sksurv tree-based models: predict() sign depends on loss function.
+    # coxph / rsf: predict() returns cumulative hazard or log-hazard — higher = more risk.
+    #   concordance_index expects higher score = longer survival → negate.
+    # ipcwls: predict() returns log-time — higher = longer survival (lower risk).
+    #   concordance_index expects higher score = longer survival → no negation.
+    if type_name in ("RandomSurvivalForest", "GradientBoostingSurvivalAnalysis", "ExtraSurvivalTrees"):
+        raw = model.predict(X_imp)
+        loss = getattr(model, "_loss_", "coxph")
+        survival_proxy = raw if loss == "ipcwls" else -raw
+        return float(concordance_index(T_test, survival_proxy, E_test))
 
     # lifelines models expose partial_hazard / median survival time as a
     # risk proxy; predict_expectation gives expected survival time (lower

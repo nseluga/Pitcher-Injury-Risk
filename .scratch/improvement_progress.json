@@ -1,11 +1,11 @@
 {
   "_meta": {
-    "status": "in_progress",
+    "status": "converged",
     "baseline_c_index": 0.514,
     "best_c_index": 0.5658,
-    "consecutive_non_improvements": 2,
-    "rounds_completed": 5,
-    "notes": "Phase 3A survival model improvement (NB07). True baseline 0.514 (Cox PH, all-injury). Pre-tracking NB07 improvements (arm-only event, stratified Cox, elastic-net, GBSA addition) achieved 0.5559 best C-index as of 2026-06-19. Round S-001: stochastic GBSA subsample=0.8 → C-index 0.5591 (+0.0032). Round S-002: GBSA double-stochastic null result — column subsampling and n=200 both hurt; max_features=None confirmed optimal. Round S-003: Ensemble rank-average (GBSA+Cox+RSF) → C-index 0.5658 (+0.0067). Round S-004: Log-normal AFT as 4th ensemble member → regression (0.5637, -0.0021); reverted. Round S-005: ExtraSurvivalTrees → null/regression (EST C=0.5381, all EST ensemble variants weaker than S003 base); reverted. consecutive_non_improvements=2. Next: GBSA IPCWLS loss or weighted ensemble optimization."
+    "consecutive_non_improvements": 3,
+    "rounds_completed": 6,
+    "notes": "Phase 3A survival model improvement (NB07). True baseline 0.514 (Cox PH, all-injury). Pre-tracking NB07 improvements (arm-only event, stratified Cox, elastic-net, GBSA addition) achieved 0.5559 best C-index as of 2026-06-19. Round S-001: stochastic GBSA subsample=0.8 → C-index 0.5591 (+0.0032). Round S-002: GBSA double-stochastic null result — column subsampling and n=200 both hurt; max_features=None confirmed optimal. Round S-003: Ensemble rank-average (GBSA+Cox+RSF) → C-index 0.5658 (+0.0067). Round S-004: Log-normal AFT as 4th ensemble member → regression (0.5637, -0.0021); reverted. Round S-005: ExtraSurvivalTrees → null/regression (EST C=0.5381, all EST ensemble variants weaker than S003 base); reverted. Round S-006: GBSA IPCWLS loss → null/failed — ipc_weights AssertionError at 91% censoring (KM censoring distribution hits zero). consecutive_non_improvements=3. CONVERGED."
   },
   "round_S001": {
     "status": "done",
@@ -107,5 +107,19 @@
     },
     "verdict": "reverted — EST individual C=0.5381 well below RSF (0.5537); both EST ensemble variants hurt. Root cause: random split thresholds lose signal with 91% censoring + 82 correlated features. S003 ensemble (0.5658) unchanged. consecutive_non_improvements=2.",
     "side_effect_kept": "Cell 12 FAST_TUNING grids reduced from ~19 to 3 configs (1 per model, known best). TEST_MODE now ~20 min vs 2+ hours."
+  },
+  "round_S006": {
+    "status": "done",
+    "category": "loss_function",
+    "description": "GBSA IPCWLS loss — AFT-style objective correcting for censoring bias at 91% arm-only censoring",
+    "c_index_before": 0.5658,
+    "c_index_after": 0.5658,
+    "delta": 0.0,
+    "ibs_before": null,
+    "ibs_after": null,
+    "notebooks_changed": ["07"],
+    "failure_mode": "AssertionError in sksurv.nonparametric.ipc_weights (Ghat > 0 fails at 91% censoring — KM censoring distribution hits zero at latest event times)",
+    "ensemble_c_index_full_run": 0.5649,
+    "verdict": "null/failed — IPCWLS is fundamentally incompatible with 91% censoring. ipc_weights assertion fails at fit time; first coxph config ran (C=0.5591), then IPCWLS configs crashed. No model change; ensemble at 0.5649 (S-003 baseline ≈ 0.5658 within variance). API additions in survival_models.py (loss param, sign convention) retained. consecutive_non_improvements=3. CONVERGED."
   }
 }

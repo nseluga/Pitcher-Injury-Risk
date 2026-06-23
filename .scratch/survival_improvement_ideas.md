@@ -1,3 +1,85 @@
+# Survival Model Improvement Ideas — 2026-06-23 Round S-006 (THIS SESSION)
+
+## Status entering this session
+- Rounds completed: 5
+- Best C-index: 0.5658 (ensemble GBSA+Cox+RSF, rank-average)
+- consecutive_non_improvements: 2 (S-004: -0.0021 reverted; S-005: 0.0 reverted)
+- One more non-improvement → status = "converged"
+
+## Already tried
+- Pre-tracking: arm-only event, stratified Cox, elastic-net Cox, GBSA addition
+- S-001: Stochastic GBSA subsample=0.8 → +0.0032 (kept)
+- S-002: GBSA column subsampling → null result (reverted; column subsampling hurts with 82 correlated features)
+- S-003: Rank-average ensemble GBSA+Cox+RSF → +0.0067 (kept)
+- S-004: Log-normal AFT as 4th ensemble member → -0.0021 (reverted; AFT C=0.5447 too weak)
+- S-005: ExtraSurvivalTrees as ensemble member → 0.0 (reverted; EST C=0.5381, random splits lose signal at 91% censoring)
+
+## New approaches — S-006 brainstorm
+
+1. **GBSA IPCWLS loss** (CHOSEN) — Replace default Cox partial likelihood loss in
+   GradientBoostingSurvivalAnalysis with `loss='ipcwls'` (Inverse Probability of Censoring
+   Weighted Least Squares). IPCWLS fits an AFT-style model that doesn't require the PH
+   assumption (already violated per Schoenfeld residuals) and reweights observations by
+   the inverse censoring probability, correcting for censoring bias under 91% arm-only
+   censoring. scikit-survival docs confirm this is a valid loss parameter. Requires a
+   sign-convention fix in compute_concordance_index (IPCWLS predict() returns log-time,
+   not cumulative hazard). If IPCWLS GBSA C > 0.5591 (coxph GBSA), ensemble improves.
+   Risk: censoring is partially informative (non-arm injuries), which can hurt IPCWLS.
+
+2. **CoxnetSurvivalAnalysis (scikit-survival)** — Replace lifelines Cox with
+   `sksurv.linear_model.CoxnetSurvivalAnalysis`. Elastic-net on ALL 82 features
+   (no 30-feature pre-selection). Coordinate descent + LASSO auto-zeroes irrelevant
+   features. May improve Cox component's individual C (currently 0.5559) → ensemble gains.
+
+3. **Weighted ensemble (learned weights)** — Optimize (w_gbsa, w_cox, w_rsf) on 2021-22
+   held-out val set. GBSA > Cox > RSF individually; equal weights may underweight GBSA.
+   scipy.optimize.minimize with concordance objective. Fast (no retraining). Risk: small
+   val set overfitting; likely < +0.005.
+
+4. **ComponentwiseGradientBoostingSurvivalAnalysis** — Univariate base learners (per feature)
+   instead of decision trees. Different functional form from GBSA+RSF, potentially more
+   robust to the correlated feature space under 91% censoring.
+
+5. **FastSurvivalSVM** — Directly maximizes a C-index surrogate via max-margin optimization.
+   Fundamentally different inductive bias from trees and linear models. Could add ensemble
+   diversity with good individual performance.
+
+6. **GBSA with `loss='squared'`** — Regression on log(T) without censoring correction.
+   Simpler than IPCWLS. May find different signal than Cox partial likelihood loss.
+
+7. **Reduced censoring horizon (60d)** — More events (less censoring) could stabilize
+   gradient estimates. Risk: changes the prediction target and may lose late-window signal.
+
+8. **Season phase feature** — Early/mid/late season indicator added to feature matrix.
+   Requires NB05 edit. Injury hazard varies across season; Cox PH can't model without it.
+
+9. **Age × workload interaction** — age × acwr_7_28 and age × pitches_90d. Prior research
+   shows age amplifies ACWR-related injury risk. Simple to add, no NB05 rebuild needed
+   (compute at fit time in the model function).
+
+10. **Larger RSF (n=200, max_features='log2')** — Current best RSF: n=100, depth=4, msl=15,
+    sqrt. log2 features per split = fewer features per node = more diverse trees. May marginally
+    improve RSF C from 0.5537, slightly improving the ensemble.
+
+## Selected for this round
+**S-006: GBSA IPCWLS loss** — targets the best individual model (GBSA C=0.5591) via a
+different loss function designed for heavily censored survival data. One hyperparameter change
+plus a required sign-convention fix in compute_concordance_index. Test 3 configs:
+(1) reference coxph, (2) IPCWLS lr=0.1, (3) IPCWLS lr=0.05.
+
+## Research findings (2026-06-23)
+- scikit-survival docs confirm `loss='ipcwls'` is a valid parameter for GradientBoostingSurvivalAnalysis;
+  IPCWLS predictions are log-time (higher = longer survival), opposite sign from coxph.
+- "The C-index Multiverse" (arXiv:2508.14821): at high censoring rates, Harrell's C-index can be
+  biased; IPCW-based concordance provides a more unbiased and consistent estimate of population
+  concordance. With 91% censoring, IPCWLS loss directly corrects for this source of bias at gradient
+  computation time.
+- Implementation complete: `loss` param added to `train_gradient_boosted_survival()`, `_loss_` attr
+  stashed on model, `compute_concordance_index()` handles sign convention. NB07 FAST_TUNING grid
+  already contains (1) coxph reference, (2) IPCWLS lr=0.1, (3) IPCWLS lr=0.05. Execution this session.
+
+---
+
 # Survival Model Improvement Ideas — 2026-06-22 Round S-005 (THIS SESSION)
 
 ## Status entering this session

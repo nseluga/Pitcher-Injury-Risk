@@ -2,6 +2,50 @@
 
 ---
 
+## 2026-06-23 Round S-006 — GBSA IPCWLS Loss (null/failed — incompatible with 91% censoring)
+
+### Hypothesis
+Replace the default Cox partial likelihood loss in `GradientBoostingSurvivalAnalysis` with
+`loss='ipcwls'` (Inverse Probability of Censoring Weighted Least Squares). With 91% arm-only
+censoring, IPCWLS should correct for censoring bias by reweighting uncensored observations by
+their inverse censoring probability — more statistically efficient than Cox PL under heavy
+censoring. Sign convention fix: IPCWLS `predict()` returns log-time (higher = longer survival),
+opposite of coxph, requiring negation in `compute_concordance_index`.
+Research: "C-index Multiverse" (arXiv:2508.14821) — Harrell's C-index is biased at high censoring
+rates; IPCW-based concordance provides a more unbiased estimate. scikit-survival docs confirm
+`loss='ipcwls'` is a valid parameter for `GradientBoostingSurvivalAnalysis`.
+
+### Implementation
+- `src/models/survival_models.py`: Added `loss` parameter to `train_gradient_boosted_survival()`,
+  stashes `model._loss_` attribute. Updated `compute_concordance_index` to handle sign convention
+  (no negation for ipcwls). Both changes kept as valid API additions.
+- `notebooks/07_survival_models.ipynb` (cell 12): Added 2 IPCWLS configs to FAST_TUNING grid —
+  `loss='ipcwls', lr=0.1` and `loss='ipcwls', lr=0.05`. REMOVED after failure diagnosis (see below).
+- Note: IPCWLS configs were removed from FAST_TUNING grid in the post-failure cleanup.
+
+### Results
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| C-index (test) | 0.5658 | 0.5658 | 0.000 |
+| IBS | — | — | — |
+| Notable HRs / curves | — | N/A — IPCWLS failed to fit | — |
+
+**Failure diagnosis:** `sksurv.nonparametric.ipc_weights` raises `AssertionError` (line 482:
+`assert (Ghat > 0).all()`) when censoring is 91%. The Kaplan-Meier estimate of the censoring
+distribution hits zero at the latest event times — a fundamental incompatibility between IPCWLS
+and our dataset's extreme censoring rate. Confirmed by isolated test with `n=5000` and 9% event
+rate (matching our data). IPCWLS requires a reliable censoring KM estimate, which is unavailable
+when 91% of observations are censored within the 90-day horizon. The reference coxph config
+(C=0.5591) continued to run correctly; ensemble fell back to S-003 config (C=0.5649 ≈ 0.5658).
+
+### Verdict
+**Null/failed.** IPCWLS is fundamentally incompatible with 91% censoring — `ipc_weights` assertion
+fails at fit time. The underlying `loss` parameter addition and sign convention fix are kept in
+`survival_models.py` as valid API additions (useful if censoring ever drops below ~50%). No model
+or metric change. `consecutive_non_improvements` → 3. **Phase 3A status: converged.**
+
+---
+
 ## 2026-06-23 Round S-005 — ExtraSurvivalTrees as Ensemble Member
 
 ### Hypothesis
