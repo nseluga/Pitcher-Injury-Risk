@@ -1,3 +1,42 @@
+# Survival Model Improvement Ideas — 2026-06-22 Round S-005 (THIS SESSION)
+
+## Status entering this session
+- Rounds completed: 4
+- Best C-index: 0.5658 (3-model ensemble: GBSA+Cox+RSF)
+- consecutive_non_improvements: 1 (S-004 AFT regression -0.0021, reverted)
+- S-005 code already in notebook (ExtraSurvivalTrees) but TEST_MODE TIMED OUT at tuning cell
+
+## Fresh brainstorm — 2026-06-22
+
+Already tried: Arm-only event, Stratified Cox, Elastic-net Cox, GBSA (pre-tracking), S-001 stochastic GBSA, S-002 column subsampling (null), S-003 ensemble GBSA+Cox+RSF (+0.0067), S-004 AFT 4th member (reverted).
+
+1. **ExtraSurvivalTrees (S-005, already in notebook)** — Random split thresholds decorrelate from GBSA more than RSF does. Fix timeout by reducing FAST_TUNING grid and setting RUN_TUNING=not TEST_MODE. CHOSEN.
+
+2. **GBSA with IPCWLS loss** — `GradientBoostingSurvivalAnalysis(loss='ipcwls')`. With 91% censoring, IPCWLS theoretically more efficient than Cox partial likelihood. One-parameter change, zero new infrastructure.
+
+3. **Weighted ensemble** — Optimize GBSA:Cox:RSF weights on 2022 validation season instead of equal 1/3. GBSA (0.5591) > Cox (0.5559) > RSF (0.5549) — GBSA may deserve > 33% weight.
+
+4. **CoxnetSurvivalAnalysis (sksurv)** — Coordinate-descent LASSO Cox over all 82 features (not top-30 correlation filter). Different feature set = ensemble diversity.
+
+5. **Log-rank feature selection for Cox** — Replace corrwith(E) with per-feature log-rank p-value. Aligns feature selection criterion with survival-specific signal. acwr_7_28 likely ranks higher.
+
+6. **Season-phase feature** — early/mid/late season indicator. Requires NB05 re-run.
+
+7. **Cumulative all-injury IL count** — total_prior_il_count across all body parts as frailty proxy. Requires NB05 re-run.
+
+8. **Multi-seed GBSA ensemble** — Average 3 GBSA runs with seeds {42, 0, 123}. Stochastic (sub=0.8) → different seeds = different models → averaging reduces Monte Carlo noise.
+
+9. **Multi-strata Cox (bin fb_pct_30d_avg)** — strongest PH violator (p<5e-5). Quartile bins as additional strata alongside prior_il_elbow. Aggressively relaxes both PH violations.
+
+10. **GBSA min_samples_leaf=15** — untested midpoint between 10 (too small) and 20 (current). Minor regularization adjustment.
+
+## Decision for this session
+**Idea 1: ExtraSurvivalTrees (S-005)** — already coded, just needs the tuning timeout fixed.
+Fix: set `RUN_TUNING = not TEST_MODE` in cell 11 to skip tuning in TEST_MODE.
+Second choice if S-005 fails: Idea 2 (IPCWLS loss).
+
+---
+
 # Survival Model Improvement Ideas — 2026-06-21 Round S-005
 
 ## Status entering S-005

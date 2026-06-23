@@ -1,5 +1,50 @@
 # Model Improvement Log — Phase 3A
 
+---
+
+## 2026-06-23 Round S-005 — ExtraSurvivalTrees as Ensemble Member
+
+### Hypothesis
+ExtraSurvivalTrees (EST) uses random split thresholds rather than optimal ones (unlike RSF and
+GBSA, which both search for the best split point). The extra randomization produces trees more
+decorrelated from GBSA than RSF is — since RSF and GBSA share the optimal-threshold inductive
+bias, their errors may be correlated. EST's log-rank criterion ensures survival-specific split
+quality while the random thresholds reduce inter-tree correlation. Decorrelated models should
+improve ensemble variance reduction when combined with GBSA+Cox in the rank-average ensemble.
+sksurv docs: "Compared to RandomSurvivalForest, randomness goes one step further in the way
+splits are computed." Evidence: Geurts et al. (2006) Extra-Trees reduce correlation among ensemble
+members beyond bagged forests.
+
+### Implementation
+- `notebooks/07_survival_models.ipynb` (cell 5): Added ExtraSurvivalTrees training via
+  `train_extra_survival_trees()` from `src/models/survival_models.py` (already implemented).
+- Cell 14: Added 3-way comparison: S003_base (GBSA+Cox+RSF), S005_varA (GBSA+Cox+EST, EST
+  replacing RSF), S005_varB (GBSA+Cox+RSF+EST, EST as 4th member).
+- Cell 12: Reduced FAST_TUNING grids to 1 config per model (known best from prior rounds) to
+  fix a 2-hour TEST_MODE timeout that blocked prior S-005 execution.
+
+### Results (TEST_MODE: 2022–2024)
+| Metric | Before (S-003) | After | Delta |
+|--------|---------------|-------|-------|
+| C-index (test, 3-model ensemble) | 0.5658 (full) / 0.5649 (TM) | 0.5649 | ±0.000 |
+| EST individual C-index | — | 0.5381 | — |
+| S005_varA (GBSA+Cox+EST) | — | 0.5602 | −0.0047 vs TM base |
+| S005_varB (GBSA+Cox+RSF+EST) | — | 0.5609 | −0.0040 vs TM base |
+| Best ensemble (S003_base wins) | 0.5649 (TM) | 0.5649 | 0.0000 |
+
+Individual model C-indices (TEST_MODE tuned):
+- GBSA: 0.5591 | Cox: 0.5559 | RSF: 0.5537 | **EST: 0.5381**
+
+### Verdict
+**Null result / regression — reverted.** ExtraSurvivalTrees achieved C=0.5381 individually,
+substantially weaker than RSF (0.5537). Both EST-containing ensemble variants hurt vs. S003_base.
+Root cause: with 91% censoring and 82 correlated features, random split thresholds lose too much
+signal per tree — RSF's optimal threshold search is essential to discriminate the rare event signal.
+EST decorrelation benefit is outweighed by the per-tree accuracy penalty. EST code removed from
+training cell and ensemble comparison; S003 3-model ensemble (GBSA+Cox+RSF) remains canonical.
+`consecutive_non_improvements` → 2. Tuning timeout fix (minimal FAST_TUNING grids) kept — reduces
+TEST_MODE from 2+ hours to ~20 minutes without affecting full-run quality.
+
 Tracks each attempted improvement round: hypothesis, implementation, results, verdict.
 Primary metric: PR-AUC on 30-day injury horizon, temporal CV mean (folds 1–4, seasons 2021–2024).
 Baseline: RF temporal CV mean = 0.148.

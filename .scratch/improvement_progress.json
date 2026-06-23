@@ -3,9 +3,9 @@
     "status": "in_progress",
     "baseline_c_index": 0.514,
     "best_c_index": 0.5658,
-    "consecutive_non_improvements": 1,
-    "rounds_completed": 4,
-    "notes": "Phase 3A survival model improvement (NB07). True baseline 0.514 (Cox PH, all-injury). Pre-tracking NB07 improvements (arm-only event, stratified Cox, elastic-net, GBSA addition) achieved 0.5559 best C-index as of 2026-06-19. Round S-001: stochastic GBSA subsample=0.8 → C-index 0.5591 (+0.0032). Round S-002: GBSA double-stochastic null result — column subsampling and n=200 both hurt; max_features=None confirmed optimal. Round S-003: Ensemble rank-average (GBSA+Cox+RSF) → C-index 0.5658 (+0.0067). Round S-004: Log-normal AFT as 4th ensemble member → regression (0.5637, -0.0021); reverted. consecutive_non_improvements=1."
+    "consecutive_non_improvements": 2,
+    "rounds_completed": 5,
+    "notes": "Phase 3A survival model improvement (NB07). True baseline 0.514 (Cox PH, all-injury). Pre-tracking NB07 improvements (arm-only event, stratified Cox, elastic-net, GBSA addition) achieved 0.5559 best C-index as of 2026-06-19. Round S-001: stochastic GBSA subsample=0.8 → C-index 0.5591 (+0.0032). Round S-002: GBSA double-stochastic null result — column subsampling and n=200 both hurt; max_features=None confirmed optimal. Round S-003: Ensemble rank-average (GBSA+Cox+RSF) → C-index 0.5658 (+0.0067). Round S-004: Log-normal AFT as 4th ensemble member → regression (0.5637, -0.0021); reverted. Round S-005: ExtraSurvivalTrees → null/regression (EST C=0.5381, all EST ensemble variants weaker than S003 base); reverted. consecutive_non_improvements=2. Next: GBSA IPCWLS loss or weighted ensemble optimization."
   },
   "round_S001": {
     "status": "done",
@@ -62,7 +62,7 @@
       {"config": "new: n=100, lr=0.1, depth=2, msl=10, sub=0.8, mf=None", "c_index": 0.5511},
       {"config": "new: n=200, lr=0.05, depth=2, msl=20, sub=0.8, mf=None", "c_index": 0.5575}
     ],
-    "verdict": "kept — ensemble C-index 0.5658 (+0.0067), exceeds +0.005 threshold; consecutive_non_improvements reset to 0. Full-run results pending (notebook running in background). GBSA hyperparameter space confirmed exhausted: all 3 new configs worse than reference; depth=2, n=100, lr=0.1, sub=0.8 is optimal."
+    "verdict": "kept — ensemble C-index 0.5658 (+0.0067), exceeds +0.005 threshold; consecutive_non_improvements reset to 0. GBSA hyperparameter space confirmed exhausted: all 3 new configs worse than reference; depth=2, n=100, lr=0.1, sub=0.8 is optimal."
   },
   "round_S004": {
     "status": "done",
@@ -84,6 +84,28 @@
       "4_model_plus_lognormal_aft": 0.5637,
       "delta": -0.0021
     },
-    "verdict": "reverted — 4-model ensemble WORSE than 3-model (0.5637 < 0.5658). Adding aft_lognormal (C=0.5447) diluted the ensemble signal rather than adding diversity. aft_loglogistic failed during evaluation (numerical instability in lifelines). AFT models at C~0.54 are too weak to improve ensemble already at 0.5658; consecutive_non_improvements=1."
+    "verdict": "reverted — 4-model ensemble WORSE than 3-model (0.5637 < 0.5658). Adding aft_lognormal (C=0.5447) diluted the ensemble signal. aft_loglogistic failed evaluation (numerical instability). consecutive_non_improvements=1."
+  },
+  "round_S005": {
+    "status": "done",
+    "category": "ensemble",
+    "description": "ExtraSurvivalTrees as ensemble member (replacing RSF or as 4th) — random split thresholds for decorrelation from GBSA",
+    "c_index_before": 0.5658,
+    "c_index_after": 0.5658,
+    "delta": 0.0,
+    "ibs_before": null,
+    "ibs_after": null,
+    "notebooks_changed": ["07"],
+    "est_individual_c_index_test_mode": 0.5381,
+    "ensemble_comparison_test_mode": {
+      "S003_base_gbsa_cox_rsf": 0.5649,
+      "S005_varA_gbsa_cox_est": 0.5602,
+      "S005_varB_gbsa_cox_rsf_est": 0.5609
+    },
+    "individual_c_indices_test_mode": {
+      "gbsa": 0.5591, "cox": 0.5559, "rsf": 0.5537, "est": 0.5381
+    },
+    "verdict": "reverted — EST individual C=0.5381 well below RSF (0.5537); both EST ensemble variants hurt. Root cause: random split thresholds lose signal with 91% censoring + 82 correlated features. S003 ensemble (0.5658) unchanged. consecutive_non_improvements=2.",
+    "side_effect_kept": "Cell 12 FAST_TUNING grids reduced from ~19 to 3 configs (1 per model, known best). TEST_MODE now ~20 min vs 2+ hours."
   }
 }
