@@ -32,6 +32,9 @@ PROJECT_ROOT = Path(__file__).parent
 NB_DIR = PROJECT_ROOT / "notebooks"
 
 NOTEBOOKS = [
+    "02_injury_database_construction.ipynb",
+    "03_data_cleaning.ipynb",
+    "04_eda.ipynb",
     "05_feature_engineering.ipynb",
     "06_baseline_models.ipynb",
     "07_survival_models.ipynb",
