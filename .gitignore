@@ -18,6 +18,16 @@ venv/
 ENV/
 .venv_pkgs/
 
+# Claude artifacts — coordination, orchestration, and process logs.
+# Kept locally but never committed. CLAUDE.md is the only Claude file tracked.
+claude_instructions.md
+run_project.sh
+run_model_long.sh
+docs/model_critique_log.md
+docs/model_improvement_log.md
+docs/notebook_debug_log.md
+.Rhistory
+
 # Scratch / debug scripts
 .scratch/
 
