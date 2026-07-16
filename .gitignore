@@ -26,6 +26,8 @@ run_model_long.sh
 docs/model_critique_log.md
 docs/model_improvement_log.md
 docs/notebook_debug_log.md
+run_notebooks.py
+scripts/
 .Rhistory
 
 # Scratch / debug scripts
