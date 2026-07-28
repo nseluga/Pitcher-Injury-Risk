@@ -56,7 +56,7 @@ def render() -> None:
             fill="toself",
             fillcolor="rgba(100,100,200,0.12)",
             line=dict(color="rgba(0,0,0,0)"),
-            name=f"{arch.capitalize()} ±1 SD",
+            name=f"{arch} ±1 SD",
         )
     )
     fig_trend.add_trace(
@@ -65,7 +65,7 @@ def render() -> None:
             y=arch_stats["arch_mean"],
             mode="lines",
             line=dict(color="rgba(100,100,200,0.5)", dash="dot"),
-            name=f"{arch.capitalize()} avg",
+            name=f"{arch} avg",
         )
     )
     fig_trend.add_trace(
