@@ -1,88 +1,120 @@
 # Pitcher Injury Risk+
 
-I built Injury Risk+ to go past the usual binary "will this pitcher get hurt" question. It combines a calibrated injury-probability model, a survival (time-to-injury) model, and expected days lost into one score, modeled after ERA+ and OPS+: normalized to a population mean of 100 within each season and pitcher archetype (starter / reliever / hybrid). 120 means 20% above the risk baseline for that archetype-season; 80 means 20% below.
+**An ERA+-style injury risk score for MLB pitchers.** Injury Risk+ combines a calibrated 30-day injury probability, a time-to-injury survival model and expected days lost into one number, normalized to 100 within each season and pitcher archetype (starter / reliever / hybrid). 120 means 20% above the risk baseline for that archetype-season; 80 means 20% below.
 
-## Headline result
-
-Discrimination is genuinely hard here: temporal-CV mean AUC-ROC **0.571** (tuned random forest, held-out 2023–24 test: 0.579), survival-ensemble C-index **0.566**. I'm stating that plainly rather than around it: pitcher injury has a real information ceiling, and that's part of what the project found, not something to bury.
-
-## Data & method
-
-- Statcast pitch-level data (via [pybaseball](https://github.com/jldbc/pybaseball)) joined to an injury database I built from MLB Stats API IL transactions: 205,911 pitcher-game rows, 3,249 pitchers, 2015–2024.
-- 76 features across workload (rolling 7/28/90-day pitch counts, ACWR), velocity trend, movement/release-point drift, pitch mix, and injury history.
-- Temporal train/test split (train 2015–2022, test 2023–2024) with isotonic calibration and walk-forward CV, not random k-fold; injury data leaks across time otherwise.
-- Four model tracks: calibrated classifiers (LR/RF/XGBoost), survival models (Cox PH, AFT, Random Survival Forest, gradient-boosted survival ensemble), multi-task injury/severity/days-lost models, and the Injury Risk+ composite scorer.
-
-## Concrete findings
-
-- A chronic velocity decline past 2 mph roughly doubles observed 30-day injury rate, 6% to 12%, the cleanest dose-response result in the project.
-- Prior IL history and 90-day cumulative pitch load dominate the signal; the standard ACWR ratio is weaker than the literature suggests it should be.
-- Interventional SHAP, checked against naive path-dependent SHAP, reorders feature importance meaningfully, a check most injury-risk projects skip.
-- Isotonic calibration tightens the probability estimates substantially (ECE 0.059 → 0.029), even though raw discrimination doesn't move.
-
-## What's built
-
-Data pipeline, all four model tracks, Injury Risk+ scoring and calibration, SHAP interpretability, a counterfactual usage-strategy simulator (I call out the survivorship-bias caveats directly in the code), and an interactive Streamlit dashboard, all committed, not planned.
-
-All data is ingested programmatically via code; no static datasets are committed to the repository.
+[Results](#results) · [Dashboard (run locally)](#dashboard) · [Notebooks with outputs](notebooks/html_exports/) · [Reproduce](#reproduce) · [Limitations](#limitations) · [Citation](#citation)
 
 ---
 
-## Repository Structure
+## Summary
+
+Which pitchers are about to land on the injured list, and why? I joined Statcast pitch-level data for 2015–2024 (205,911 pitcher-game rows, 3,249 pitchers) to an injury database I built from MLB Stats API IL transactions, then engineered workload, velocity-trend, movement/release-point drift, pitch-mix and injury-history features. Models are evaluated with a temporal split (train 2015–2022, test 2023–2024) and walk-forward CV, never random k-fold, because injury data leaks across time. **The headline finding is a ceiling: held-out AUC-ROC is about 0.58 and the survival C-index about 0.57.** Public pitch-level data carries real but weak injury signal, and the project reports that plainly instead of tuning around it.
+
+## Results
+
+30-day injury classification, held-out 2023–2024 test seasons (tuned and isotonic-calibrated; 9.9% of test rows are positives):
+
+| Model | AUC-ROC | PR-AUC | Brier |
+|---|---|---|---|
+| **Random forest** | **0.579** | **0.131** | 0.092 |
+| XGBoost | 0.572 | 0.125 | 0.092 |
+| Logistic regression | 0.561 | 0.119 | 0.093 |
+
+| Other headline numbers | Value |
+|---|---|
+| Walk-forward temporal CV, random forest, mean AUC-ROC (5 folds) | 0.571 (std 0.023) |
+| Survival model, rank-averaged ensemble (gradient-boosted survival + Cox + random survival forest), C-index | 0.566 |
+| Isotonic calibration, expected calibration error | 0.059 → 0.029 |
+
+What the models learned:
+
+- **Velocity decline is the cleanest dose-response result.** Pitchers whose fastball velocity runs more than 2 mph below their season average have a 30-day injury rate of 12%, against 6% for pitchers at or above their average.
+- **Injury history dominates.** Prior IL history features (`prior_il_total`, `prior_il_days_lost`, `days_since_last_injury`) top the random forest's feature importance.
+- **The standard ACWR ratio is weak.** `acwr_7_28` ranks 58th of the features under path-dependent SHAP and 48th under interventional SHAP, outside the top 20 either way. Interventional SHAP reorders the workload features meaningfully, so both are computed.
+- **Calibration helps probabilities, not ranking.** Isotonic calibration cuts ECE roughly in half while AUC barely moves.
+
+Numbers are from the committed notebook exports in [`notebooks/html_exports/`](notebooks/html_exports/) (notebooks 06, 09, 10, 11) and the notebook 11 write-up. The `.ipynb` files are stored without outputs (see `.gitattributes`), so the HTML exports are the readable record of results.
+
+## Dashboard
+
+A Streamlit app with four panels: season leaderboard, pitcher profile, multi-pitcher comparison and archetype analysis. It is **not hosted**: it reads the processed parquet files that the pipeline writes locally, and those are not committed. After running the pipeline once (see [Reproduce](#reproduce)):
+
+```bash
+streamlit run dashboard/app.py
+```
+
+## Method
+
+- **Data.** Statcast via [pybaseball](https://github.com/jldbc/pybaseball), 2015–2024, plus an IL-transaction injury database from the MLB Stats API.
+- **Features.** Rolling 7/28/90-day pitch counts and ACWR, velocity trend, movement and release-point drift, pitch mix, injury history.
+- **Four model tracks.** Calibrated classifiers (logistic regression, random forest, XGBoost); survival models (Cox PH, AFT, random survival forest, gradient-boosted survival and an ensemble); multi-task injury / severity / days-lost models; the Injury Risk+ composite scorer.
+- **Interpretability and simulation.** SHAP (path-dependent and interventional) and a counterfactual usage-strategy simulator, with survivorship-bias caveats called out in the code.
+
+## Repository layout
 
 ```
-Pitcher-Injury-Risk/
-│
-├── data/
-│   ├── raw/              # Unmodified API/scrape outputs
-│   │   ├── statcast/
-│   │   ├── injuries/
-│   │   ├── transactions/
-│   │   └── player_metadata/
-│   ├── processed/        # Cleaned, merged, feature-engineered datasets
-│   └── external/         # Third-party reference data
-│
-├── notebooks/            # Numbered analysis notebooks (sequential pipeline)
-├── src/
-│   ├── data/             # Data loaders and master dataset builder
-│   ├── features/         # Feature engineering modules
-│   ├── models/           # Model training, evaluation, survival models
-│   ├── scoring/          # Injury Risk+ score construction and calibration
-│   ├── simulation/       # Workload, pitch mix, and strategy simulators
-│   ├── visualization/    # Plotting utilities
-│   └── utils/            # Shared helpers
-│
-├── models/               # Serialized trained models
-├── reports/              # Figures and tables for publication/presentation
-├── tests/                # Unit and integration tests
-└── docs/                 # Architecture docs, data dictionary, roadmap
+notebooks/     01-13, the sequential pipeline (data pull to dashboard); html_exports/ has outputs
+src/
+  data/          Statcast, injury and transaction loaders, master dataset builder
+  features/      workload, velocity, movement, pitch-mix, injury-history features
+  models/        baselines, survival, multi-task, evaluation
+  scoring/       Injury Risk+ construction and calibration
+  simulation/    workload, pitch-mix and usage-strategy simulators
+dashboard/     Streamlit app (app.py, components/, data_loader.py)
+docs/          data dictionary, Injury Risk+ design, roadmap, open research questions
+tests/         dashboard data tests
+data/, models/ generated by the pipeline, not committed
 ```
-
----
 
 ## Setup
 
+Python 3.11.
+
 ```bash
-# Clone the repository
 git clone https://github.com/nseluga/Pitcher-Injury-Risk.git
 cd Pitcher-Injury-Risk
-
-# Create conda environment
-conda env create -f environment.yml
-conda activate pitcher-injury-risk
-
-# Or install via pip
 pip install -r requirements.txt
 ```
 
----
+`environment.yml` (`conda env create -f environment.yml`) also works, but it does not list `streamlit`; add it with `pip install streamlit` if you use conda.
 
-## License
+## Reproduce
 
-MIT
+No datasets are committed. Everything is pulled from public sources, so the first notebooks need network access and take a while.
 
----
+1. **Run notebooks 01 to 13 in order.** They resolve paths from the repo root, so the working directory must be the repo root, not `notebooks/`. For example:
+   ```bash
+   python - <<'EOF'
+   import glob, nbformat
+   from nbclient import NotebookClient
+   for path in sorted(glob.glob("notebooks/[0-1][0-9]_*.ipynb")):
+       nb = nbformat.read(path, as_version=4)
+       NotebookClient(nb, resources={"metadata": {"path": "."}}, timeout=None).execute()
+       nbformat.write(nb, path)
+   EOF
+   ```
+   Stages: 01-04 data collection, injury database, cleaning, EDA; 05 features; 06 baselines; 07 survival; 08 multi-task; 09 Injury Risk+ scores; 10-12 interpretability and insights; 13 dashboard prototype.
+2. **Launch the dashboard:** `streamlit run dashboard/app.py`.
+3. **Tests:** `python -m pytest tests/` (they read the processed parquet files from step 1).
 
-## Author
+## Limitations
 
-Nate Seluga
+- **The signal is weak.** AUC around 0.57-0.58 and C-index around 0.57 beat their baselines but not by much. Public Statcast captures pitch-level mechanics at population resolution; injury-specific signal (UCL torque, individual biomechanical load) needs instrumented data that is not public.
+- **All injury types are pooled** into one label (UCL tears, shoulder impingement, oblique and hamstring strains alike), which dilutes type-specific effects like slider usage and elbow injuries.
+- **Associative, not causal.** Rest, slider usage and role are confounded by manager decisions and pitcher health signals the features do not capture. The usage-strategy simulator is a model-based what-if, not an intervention estimate, and it carries survivorship bias.
+- **The notebook outputs are a snapshot.** The committed HTML exports were rendered before the final pipeline re-run on 2026-06-26, so a fresh run may shift individual figures slightly.
+
+## Citation
+
+```bibtex
+@misc{seluga2026injuryriskplus,
+  author = {Seluga, Nate},
+  title  = {Pitcher Injury Risk+: an ERA+-style injury risk score for MLB pitchers},
+  year   = {2026},
+  url    = {https://github.com/nseluga/Pitcher-Injury-Risk}
+}
+```
+
+## Data
+
+Pitch-level data from [Baseball Savant / Statcast](https://baseballsavant.mlb.com/) via [pybaseball](https://github.com/jldbc/pybaseball). Injury data from MLB Stats API IL transactions. Both belong to their owners; this repo contains code only.
